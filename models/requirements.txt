@@ -1,0 +1,10 @@
+# Deprecated: use root pyproject.toml (`uv sync --group ml` or `ml-cpu`).
+torch
+torchvision
+numpy
+pandas
+scikit-learn
+clickhouse-connect
+python-dotenv
+matplotlib
+pyarrow

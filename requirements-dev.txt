@@ -1,0 +1,4 @@
+# Deprecated: use `uv sync --group dev` from root pyproject.toml.
+# Dev / CI test dependencies (not required for runtime images).
+httpx==0.28.1
+pytest>=8.0

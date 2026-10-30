@@ -1,0 +1,27 @@
+# API image. Dependencies live in /opt/venv so the /workspace bind mount
+# does not hide them. Training stays on models/Dockerfile.dev.gpu.
+FROM python:3.11-slim
+
+WORKDIR /workspace
+
+ENV PYTHONPATH=/workspace
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV UV_LINK_MODE=copy
+ENV UV_COMPILE_BYTECODE=1
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:/root/.local/bin:${PATH}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh
+
+COPY pyproject.toml uv.lock /workspace/
+RUN uv venv "$VIRTUAL_ENV" \
+    && uv sync --frozen --no-install-project --active
+
+COPY . /workspace
+
+CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

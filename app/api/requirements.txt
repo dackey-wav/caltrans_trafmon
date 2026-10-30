@@ -1,0 +1,6 @@
+# Deprecated: use root pyproject.toml (`uv sync`); kept for reference.
+fastapi==0.115.0
+uvicorn==0.47.0
+pandas==3.0.2
+clickhouse-connect==0.8.14
+python-dotenv==1.0.1
