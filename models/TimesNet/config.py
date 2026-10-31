@@ -5,21 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from models.utils import artifacts as art
-from models.utils.constants import (
-    DEFAULT_CALENDAR_COLUMNS,
-    DEFAULT_WINDOW,
-    DEFAULT_WINDOW_15MIN,
-    EXTENDED_CALENDAR_COLUMNS,
-    SUPPORTED_FREQS,
-    SUPPORTED_THRESHOLD_METHODS,
-    VEHICLE_CLASS_LABELS,
-    default_window_for,
-)
 from models.utils.runner_common import threshold_preset as _threshold_preset
 
-FEATURE_TABLE = "vehicletrace_feature_dataset_a"
+FEATURE_TABLE = "traffic_5min"
 
-DEFAULT_FREQ = "1h"
+DEFAULT_FREQ = "15min"
 
 DEFAULT_BATCH_SIZE = 256
 DEFAULT_LEARNING_RATE = 1e-3
@@ -72,25 +62,10 @@ EVAL_PERCENTILE_QUANTILE = 0.999
 EVAL_COMBINED_ROBUST_Z = 6.0
 EVAL_COMBINED_ALERT_Z = 8.0
 
-# Domain gates (60-minute aggregates; see domain_filter.py).
+# Domain gate (60-minute aggregates; see domain_filter.py).
 DOMAIN_AGG_FREQ = "1h"
 MIN_TRAFFIC_INTENSITY_PCT = 0.20
-MIN_CLASS_SHARE_PCT = 0.30
-MIN_LANE_RATIO_SHIFT = 0.15
 MIN_HOURLY_VOLUME = 5.0
-LANE_SHIFT_SCPRS = ("24008", "24017")  # S3a, A4
-
-PROFILE_HOURLY_GPU = {
-    "freq": "1h",
-    "window": 48,
-    "batch_size": 512,
-    "d_model": 64,
-    "patience": 6,
-    "epochs": 35,
-    "num_workers": 4,
-    "pin_memory": True,
-    "use_amp": True,
-}
 
 PROFILE_15MIN_GPU = {
     "freq": "15min",
@@ -104,15 +79,12 @@ PROFILE_15MIN_GPU = {
     "use_amp": True,
 }
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS_ROOT = art.repo_artifacts_base() / "anomaly" / "timesnet"
-DEFAULT_GT_EVENTS_CSV = _REPO_ROOT / "models" / "data" / "gt_anomalies" / "gt_events.csv"
 
 default_run_id = art.default_run_id
 run_dir = lambda run_id: art.run_dir(ARTIFACTS_ROOT, run_id)
 plots_dir = lambda run_id: art.plots_dir(ARTIFACTS_ROOT, run_id)
 anomaly_plots_dir = lambda run_id: art.anomaly_plots_dir(ARTIFACTS_ROOT, run_id)
-class_summary_plots_dir = lambda run_id: art.class_summary_plots_dir(ARTIFACTS_ROOT, run_id)
 reconstruction_plots_dir = lambda run_id: art.reconstruction_plots_dir(ARTIFACTS_ROOT, run_id)
 dataset_path = lambda run_id: art.dataset_path(ARTIFACTS_ROOT, run_id)
 dataset_meta_path = lambda run_id: art.dataset_meta_path(ARTIFACTS_ROOT, run_id)
@@ -138,10 +110,6 @@ def thresholds_robust_path(run_id: str) -> Path:
     return art.run_dir(ARTIFACTS_ROOT, run_id) / "thresholds_robust.json"
 
 
-def gt_eval_path(run_id: str) -> Path:
-    return art.run_dir(ARTIFACTS_ROOT, run_id) / "gt_eval.json"
-
-
 def threshold_preset(name: str) -> dict[str, float | str]:
     return _threshold_preset(name, THRESHOLD_PRESETS)
 
@@ -150,7 +118,7 @@ def embed_freq_for(freq: str) -> str:
     """Map dataset freq to TimesNet TimeFeatureEmbedding freq code."""
     if freq == "1h":
         return "h"
-    if freq == "15min":
+    if freq in ("15min", "5min"):
         return "t"
     raise ValueError(f"Unsupported freq: {freq!r}")
 

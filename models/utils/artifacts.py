@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -18,7 +18,7 @@ def repo_artifacts_base() -> Path:
 
 
 def default_run_id() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def run_dir(artifacts_root: Path, run_id: str) -> Path:

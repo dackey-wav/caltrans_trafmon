@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import time
+from collections.abc import Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import pandas as pd
@@ -46,10 +45,10 @@ from models.TimesNet.config import (
     DEFAULT_USE_RMSE_LOSS,
     DEFAULT_VAL_FRACTION,
     DEFAULT_WEIGHT_DECAY,
-    SUPPORTED_THRESHOLD_METHODS,
     embed_freq_for,
 )
 from models.TimesNet.model import Model, TimesNetConfig, build_timesnet_config
+from models.utils.constants import SUPPORTED_THRESHOLD_METHODS
 from models.utils.lazy_windows import all_window_starts, lazy_window_loader
 from models.utils.multivariate_grid import (
     extract_active_mask,
@@ -885,5 +884,5 @@ def save_thresholds(thresholds: dict, path: Path) -> Path:
 
 
 def load_thresholds(path: Path) -> dict:
-    with open(Path(path), "r", encoding="utf-8") as f:
+    with open(Path(path), encoding="utf-8") as f:
         return json.load(f)

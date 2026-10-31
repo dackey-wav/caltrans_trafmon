@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 
 from models.TimesNet.config import (
     DEFAULT_THRESHOLD_METHOD,
     EVAL_COMBINED_ROBUST_Z,
     EVAL_PERCENTILE_QUANTILE,
-    MIN_CLASS_SHARE_PCT,
-    MIN_LANE_RATIO_SHIFT,
     MIN_TRAFFIC_INTENSITY_PCT,
 )
 from models.TimesNet.domain_filter import domain_filter_summary
@@ -82,8 +78,6 @@ def build_anomaly_report(
     if domain_filter_enabled:
         params["domain_gates"] = {
             "traffic_intensity_pct": MIN_TRAFFIC_INTENSITY_PCT,
-            "class_share_pct": MIN_CLASS_SHARE_PCT,
-            "lane_ratio_shift": MIN_LANE_RATIO_SHIFT,
             "aggregate_freq": "1h",
         }
 

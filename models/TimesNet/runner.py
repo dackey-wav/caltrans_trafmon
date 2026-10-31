@@ -1,18 +1,16 @@
 """Thin CLI-facing orchestration for the TimesNet pipeline."""
 
 from __future__ import annotations
-import numpy as np
+
 import json
 import time
-from typing import Sequence
+from collections.abc import Sequence
 
-import pandas as pd
+import numpy as np
 
 from models.TimesNet import config as tc
 from models.TimesNet.data_prep import (
-    build_multivariate_class_frame,
     build_multivariate_frame,
-    fit_robust_scaler,
     load_dataset,
     load_meta,
     load_scaler,
@@ -20,26 +18,17 @@ from models.TimesNet.data_prep import (
     save_meta,
     save_scaler,
 )
+from models.TimesNet.domain_filter import apply_domain_filter, domain_filter_summary
 from models.TimesNet.eval import build_anomaly_report, build_metrics_report, save_json
 from models.TimesNet.plots import (
     plot_actual_with_anomalies,
-    plot_location_class_summary,
     plot_reconstruction_vs_actual,
     plot_score_timeline,
     plot_train_log,
 )
-from models.utils.multivariate_grid import (
-    extract_active_mask,
-    fit_robust_scaler_masked,
-    per_location_split_masks,
-)
-from models.TimesNet.domain_filter import apply_domain_filter, domain_filter_summary
-from models.utils.runner_common import filter_by_date_range, resolve_threshold_profile
-from models.utils.training import runtime_loader_defaults
 from models.TimesNet.train_timesnet import (
     TrainSplits,
     _resolve_device,
-    annotate_anomalies,
     annotate_combined,
     calibrate_thresholds,
     compute_scores,
@@ -50,33 +39,31 @@ from models.TimesNet.train_timesnet import (
     save_train_log,
     train_timesnet,
 )
+from models.utils.constants import DEFAULT_CALENDAR_COLUMNS, default_window_for
+from models.utils.multivariate_grid import (
+    extract_active_mask,
+    fit_robust_scaler_masked,
+    per_location_split_masks,
+)
+from models.utils.runner_common import filter_by_date_range, resolve_threshold_profile
+from models.utils.training import runtime_loader_defaults
 
 
 def run_prepare(
     run_id: str,
-    locations: Sequence[str],
     date_from: str | None = None,
     date_to: str | None = None,
     freq: str = tc.DEFAULT_FREQ,
-    calendar_columns: Sequence[str] = tc.DEFAULT_CALENDAR_COLUMNS,
-    feature_table: str | None = None,
+    calendar_columns: Sequence[str] = DEFAULT_CALENDAR_COLUMNS,
 ) -> None:
     started = time.time()
-    table = feature_table or tc.FEATURE_TABLE
-    print(
-        f"[timesnet:prepare] run_id={run_id} locations={list(locations)} "
-        f"freq={freq} feature_table={table}"
+    print(f"[timesnet:prepare] run_id={run_id} freq={freq} table={tc.FEATURE_TABLE}")
+    frame, meta = build_multivariate_frame(
+        date_from=date_from,
+        date_to=date_to,
+        freq=freq,
+        calendar_columns=calendar_columns,
     )
-    frame_kwargs: dict = {
-        "locations": locations,
-        "date_from": date_from,
-        "date_to": date_to,
-        "freq": freq,
-        "calendar_columns": calendar_columns,
-    }
-    if feature_table is not None:
-        frame_kwargs["feature_table"] = feature_table
-    frame, meta = build_multivariate_frame(**frame_kwargs)
     ds_path = save_dataset(frame, tc.dataset_path(run_id))
     meta_path = save_meta(meta, tc.dataset_meta_path(run_id))
 
@@ -92,42 +79,6 @@ def run_prepare(
     print(f"[timesnet:prepare] dataset={ds_path}")
     print(f"[timesnet:prepare] meta={meta_path}")
     print(f"[timesnet:prepare] elapsed_s={elapsed:.2f}")
-
-
-def run_prepare_class(
-    run_id: str,
-    locations: Sequence[str],
-    date_from: str | None = None,
-    date_to: str | None = None,
-    freq: str = tc.DEFAULT_FREQ,
-    calendar_columns: Sequence[str] = tc.DEFAULT_CALENDAR_COLUMNS,
-    min_nonzero_hours_per_series: int = 0,
-) -> None:
-    started = time.time()
-    print(f"[timesnet:prepare-class] run_id={run_id} locations={list(locations)} freq={freq}")
-    frame, meta = build_multivariate_class_frame(
-        locations=locations,
-        date_from=date_from,
-        date_to=date_to,
-        freq=freq,
-        calendar_columns=calendar_columns,
-        min_nonzero_hours_per_series=min_nonzero_hours_per_series,
-    )
-    ds_path = save_dataset(frame, tc.dataset_path(run_id))
-    meta_path = save_meta(meta, tc.dataset_meta_path(run_id))
-
-    elapsed = time.time() - started
-    total_cells = meta.rows * max(meta.n_targets, 1)
-    imputed_rate = (meta.imputed_rows / total_cells) if total_cells else 0.0
-    print(
-        f"[timesnet:prepare-class] rows={meta.rows} n_targets={meta.n_targets} "
-        f"n_context={meta.n_context} imputed_rows={meta.imputed_rows} "
-        f"imputed_rate={imputed_rate*100:.2f}% inactive_rows={meta.inactive_rows} "
-        f"gap_imputed_rows={meta.gap_imputed_rows} ds_range={meta.ds_min}..{meta.ds_max}"
-    )
-    print(f"[timesnet:prepare-class] dataset={ds_path}")
-    print(f"[timesnet:prepare-class] meta={meta_path}")
-    print(f"[timesnet:prepare-class] elapsed_s={elapsed:.2f}")
 
 
 def run_train(
@@ -169,7 +120,7 @@ def run_train(
     meta = load_meta(tc.dataset_meta_path(run_id))
 
     if window is None:
-        window = tc.default_window_for(meta.freq)
+        window = default_window_for(meta.freq)
 
     column_order = list(meta.target_columns) + list(meta.context_columns)
     values = frame[column_order].to_numpy(dtype=np.float32)
@@ -248,22 +199,6 @@ def run_train(
     print(f"[timesnet:train] elapsed_s={elapsed:.2f}")
 
 
-def run_gt_eval(
-    run_id: str,
-    *,
-    eval_split: str = "test",
-    gt_csv: str | None = None,
-) -> None:
-    from models.data.gt_anomalies.gt_eval import run_gt_eval_for_artifacts
-
-    run_gt_eval_for_artifacts(
-        tc.run_dir(run_id),
-        gt_csv=gt_csv,
-        eval_split=eval_split,
-        output_path=tc.gt_eval_path(run_id),
-    )
-
-
 def run_eval(
     run_id: str,
     *,
@@ -282,8 +217,6 @@ def run_eval(
     include_full_span_plot: bool = True,
     date_from: str | None = None,
     date_to: str | None = None,
-    gt_eval: bool = False,
-    gt_csv: str | None = None,
 ) -> None:
     started = time.time()
     range_label = f" range={date_from or '*'}..{date_to or '*'}"
@@ -294,7 +227,7 @@ def run_eval(
     scaler, _ = load_scaler(tc.scaler_path(run_id))
     model = load_model(tc.model_path(run_id), data_freq=meta.freq)
 
-    with open(tc.train_log_path(run_id), "r", encoding="utf-8") as f:
+    with open(tc.train_log_path(run_id), encoding="utf-8") as f:
         log = json.load(f)
     hp = log["hparams"]
     splits = TrainSplits(
@@ -473,23 +406,6 @@ def run_eval(
             f"{tc.reconstruction_plots_dir(run_id)}"
         )
 
-    has_class_targets = any("__cls" in c for c in meta.target_columns)
-    if has_class_targets:
-        cls_paths = plot_location_class_summary(
-            frame=plot_frame,
-            annotated_scores=plot_scores,
-            target_columns=list(meta.target_columns),
-            output_dir=tc.class_summary_plots_dir(run_id),
-            eval_split=eval_split,
-            zoom_to_eval=zoom_to_eval,
-            max_locations=plot_top,
-        )
-        if cls_paths:
-            print(
-                f"[timesnet:eval] class_summary_plots={len(cls_paths)} → "
-                f"{tc.class_summary_plots_dir(run_id)}"
-            )
-
     per_series = anomaly_report.get("per_series", [])
     top_series = sorted(per_series, key=lambda r: r.get("rate", 0.0), reverse=True)[:10]
     comparison_payload = {
@@ -541,9 +457,4 @@ def run_eval(
     print(f"[timesnet:eval] anomalies_stat={tc.anomalies_stat_path(run_id)}")
     print(f"[timesnet:eval] scores={tc.scores_path(run_id)}")
     print(f"[timesnet:eval] comparison={tc.comparison_path(run_id)}")
-    if gt_eval:
-        try:
-            run_gt_eval(run_id, eval_split=eval_split, gt_csv=gt_csv)
-        except FileNotFoundError as exc:
-            print(f"[timesnet:eval] gt_eval skipped: {exc}")
     print(f"[timesnet:eval] elapsed_s={elapsed:.2f}")

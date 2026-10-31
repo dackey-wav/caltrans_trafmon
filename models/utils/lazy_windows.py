@@ -7,7 +7,7 @@ targets × 79k steps × window 192). This module slices windows from the base
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import torch

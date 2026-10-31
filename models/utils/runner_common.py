@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 
 import pandas as pd
 
@@ -29,7 +29,11 @@ def parse_eval_date(ts: str) -> pd.Timestamp:
 
 
 def freq_timedelta(freq: str) -> pd.Timedelta:
-    return pd.Timedelta("15min") if freq == "15min" else pd.Timedelta("1h")
+    if freq == "5min":
+        return pd.Timedelta("5min")
+    if freq == "15min":
+        return pd.Timedelta("15min")
+    raise ValueError(f"Unsupported freq: {freq!r}")
 
 
 def calendar_columns_from_meta(meta) -> list[str]:
@@ -106,7 +110,6 @@ def extend_frame_for_eval_date_range(
         f"(prepared span {ds_min} .. {ds_max})"
     )
     ext_frame, _ = build_multivariate_frame(
-        locations=meta.locations,
         date_from=fetch_from,
         date_to=fetch_to,
         freq=meta.freq,
@@ -119,7 +122,7 @@ def extend_frame_for_eval_date_range(
         raise ValueError(
             f"No supplemental rows returned for eval date range {date_from!r}..{date_to!r}. "
             f"Prepared dataset span is {ds_min} .. {ds_max}. "
-            "Check ClickHouse data and location ids."
+            "Check ClickHouse data for this date range."
         )
     print(f"[{log_prefix}:eval] extended dataset rows {original_len} -> {len(merged)}")
     return merged, original_len

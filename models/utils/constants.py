@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-SUPPORTED_FREQS = ("1h", "15min")
+SUPPORTED_FREQS = ("15min", "5min")
+
+# A 5-minute row is a real observation only at 100. Lower values were imputed
+# upstream and stay out of the training mask.
+OBSERVED_ACTIVE_MIN_PERCENT = 100.0
 
 DEFAULT_CALENDAR_COLUMNS: list[str] = [
     "hour_sin",
@@ -19,41 +23,32 @@ DEFAULT_CALENDAR_COLUMNS: list[str] = [
     "is_month_start",
     "is_month_end",
     "days_to_nearest_holiday",
-    "is_holiday_pl",
+    "is_holiday_ca",
     "is_pre_holiday",
     "is_post_holiday",
     "is_bridge_day",
-    "is_long_weekend_period",
+    "is_long_weekend",
     "is_pre_long_weekend",
     "is_shopping_sunday",
     "is_school_holiday",
-    "is_ferie_zimowe",
-    "is_wakacje_letnie",
+    "is_school_break_morgan_hill",
+    "is_school_break_san_jose",
+    "is_college_break_gavilan",
+    "is_school_year_start",
+    "is_summer_vacation",
 ]
 
 EXTENDED_CALENDAR_COLUMNS = DEFAULT_CALENDAR_COLUMNS.copy()
 
-VEHICLE_CLASS_LABELS: dict[int, str] = {
-    1: "motorcycle",
-    2: "car+trailer",
-    3: "truck",
-    5: "bus",
-    7: "car",
-    8: "truck+trailer",
-    9: "tractor+trailer",
-    10: "unknown-10",
-    11: "LCV",
-}
-
 SUPPORTED_THRESHOLD_METHODS = ("robust_z", "percentile")
 
-DEFAULT_WINDOW = 48
 DEFAULT_WINDOW_15MIN = 192
+DEFAULT_WINDOW_5MIN = 576
 
 
 def default_window_for(freq: str) -> int:
-    if freq == "1h":
-        return DEFAULT_WINDOW
     if freq == "15min":
         return DEFAULT_WINDOW_15MIN
+    if freq == "5min":
+        return DEFAULT_WINDOW_5MIN
     raise ValueError(f"Unsupported freq: {freq!r}")

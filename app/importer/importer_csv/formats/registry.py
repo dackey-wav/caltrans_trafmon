@@ -47,7 +47,7 @@ FORMAT = FormatSpec(
 
 def get_format() -> FormatSpec:
     """Return the only registered import."""
-    
+
     return FORMAT
 
 

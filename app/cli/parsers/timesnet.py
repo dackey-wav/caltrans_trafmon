@@ -3,6 +3,7 @@
 import argparse
 
 from models.TimesNet import config as tc
+from models.utils.constants import SUPPORTED_FREQS, SUPPORTED_THRESHOLD_METHODS
 
 
 def register(subparsers: argparse._SubParsersAction) -> None:
@@ -13,37 +14,12 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         "prepare",
         help="Build a multivariate wide-format dataset for TimesNet.",
     )
-    tn_prepare.add_argument("--locations", required=True)
     tn_prepare.add_argument("--date-from", default=None)
     tn_prepare.add_argument("--date-to", default=None)
     tn_prepare.add_argument("--run-id", default=None)
     tn_prepare.add_argument(
         "--freq",
-        choices=list(tc.SUPPORTED_FREQS),
-        default=tc.DEFAULT_FREQ,
-    )
-    tn_prepare.add_argument(
-        "--feature-table",
-        default=tc.FEATURE_TABLE,
-        help=(f"ClickHouse feature table for counts (default: {tc.FEATURE_TABLE})."),
-    )
-
-    tn_prepare_class = timesnet_sub.add_parser(
-        "prepare-class",
-        help="Build class-level multivariate dataset for TimesNet.",
-    )
-    tn_prepare_class.add_argument("--locations", required=True)
-    tn_prepare_class.add_argument("--date-from", default=None)
-    tn_prepare_class.add_argument("--date-to", default=None)
-    tn_prepare_class.add_argument("--run-id", default=None)
-    tn_prepare_class.add_argument(
-        "--min-nonzero-hours-per-series",
-        type=int,
-        default=24,
-    )
-    tn_prepare_class.add_argument(
-        "--freq",
-        choices=list(tc.SUPPORTED_FREQS),
+        choices=list(SUPPORTED_FREQS),
         default=tc.DEFAULT_FREQ,
     )
 
@@ -94,7 +70,7 @@ def register(subparsers: argparse._SubParsersAction) -> None:
     )
     tn_eval.add_argument(
         "--threshold-method",
-        choices=list(tc.SUPPORTED_THRESHOLD_METHODS),
+        choices=list(SUPPORTED_THRESHOLD_METHODS),
         default=tc.DEFAULT_THRESHOLD_METHOD,
     )
     tn_eval.add_argument("--threshold", type=float, default=tc.DEFAULT_ANOMALY_THRESHOLD)
@@ -134,26 +110,8 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     tn_eval.add_argument(
-        "--gt-eval",
-        action="store_true",
-        help="Write gt_eval.json after scoring (or use gt-eval for GT-only).",
-    )
-    tn_eval.add_argument(
-        "--gt-csv",
-        default=None,
-        help="Override path to ground-truth events CSV for --gt-eval.",
-    )
-    tn_eval.add_argument(
         "--no-domain-filter",
         action="store_true",
         default=False,
-        help="Skip domain gates (traffic intensity / class share / lane shift).",
+        help="Skip the hourly traffic-intensity gate.",
     )
-
-    tn_gt_eval = timesnet_sub.add_parser(
-        "gt-eval",
-        help="GT recall only — uses existing scores + anomaly JSON from a prior eval.",
-    )
-    tn_gt_eval.add_argument("--run-id", required=True)
-    tn_gt_eval.add_argument("--eval-split", choices=("val", "test"), default="test")
-    tn_gt_eval.add_argument("--gt-csv", default=None)

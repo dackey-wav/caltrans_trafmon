@@ -9,7 +9,7 @@ Optional: `TIMESNET_DEVICE=cuda` or `TIMESNET_DEVICE=cpu`.
 ## Workflow
 
 ```bash
-python -m app.cli timesnet prepare --locations loc1,loc2 --date-from 2026-03-01 --date-to 2026-04-01
+python -m app.cli timesnet prepare --date-from 2026-03-01 --date-to 2026-04-01
 python -m app.cli timesnet train --run-id <run_id>
 python -m app.cli timesnet eval --run-id <run_id> --threshold-profile balanced
 ```
@@ -20,11 +20,9 @@ Re-run `eval` after scoring fixes; retrain only if you change model hyperparamet
 ## Threshold profiles
 
 Default eval uses a **combined statistical gate** (percentile `q=0.999` AND
-robust-z `>= 6.0`) plus **domain gates** on 60-minute aggregates:
+robust-z `>= 6.0`) plus an hourly intensity gate:
 
-- traffic intensity: `|actual - expected| / expected >= 20%`
-- class share: relative share change `>= 30%` (class-level runs)
-- lane shift: lane-ratio shift on S3a/A4 (`24008`, `24017`) `>= 15 pp`
+- traffic intensity: `|actual - expected| / expected >= 20%` on flow, speed, or occupancy
 
 Profiles (override robust-z only):
 

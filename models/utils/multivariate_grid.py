@@ -1,18 +1,15 @@
-"""Masking helpers for joint multivariate anomaly models (TimesNet, TimesNet).
+"""Masks and splits for the three station channels.
 
-Locations can start/end at different times on a shared timeline. A timestep is
-**active** only when that location has an observed bucket (not merely between
-first/last measurement). Calendar hours outside the span and internal gaps are
-inactive (excluded from loss/scoring/plots). Gaps may be forward-filled in the
-stored target tensor for forward pass only; loss still uses the active mask.
-
-Train/val/test splits are assigned chronologically *per location* on active
-timesteps only (last ``test_fraction`` for test, etc.).
+A step is active only when that channel has a real observation
+(observed_percent is 100). Gaps inside the span are forward-filled in the
+stored values so the network can run, and the active mask keeps those steps
+out of the loss. Train, val, and test are the last fractions of the active
+steps of each channel.
 """
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd

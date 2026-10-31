@@ -2,8 +2,6 @@
 
 from models.TimesNet import config as tc
 
-from app.cli.helpers import split_locations
-
 
 def dispatch(args, parser) -> int | None:
     if args.command != "timesnet":
@@ -12,34 +10,12 @@ def dispatch(args, parser) -> int | None:
     if args.timesnet_command == "prepare":
         from models.TimesNet.runner import run_prepare as timesnet_prepare
 
-        locations = split_locations(args.locations)
-        if not locations:
-            parser.error("--locations must not be empty")
         run_id = args.run_id or tc.default_run_id()
         timesnet_prepare(
             run_id=run_id,
-            locations=locations,
             date_from=args.date_from,
             date_to=args.date_to,
             freq=args.freq,
-            feature_table=args.feature_table,
-        )
-        return 0
-
-    if args.timesnet_command == "prepare-class":
-        from models.TimesNet.runner import run_prepare_class as timesnet_prepare_class
-
-        locations = split_locations(args.locations)
-        if not locations:
-            parser.error("--locations must not be empty")
-        run_id = args.run_id or tc.default_run_id()
-        timesnet_prepare_class(
-            run_id=run_id,
-            locations=locations,
-            date_from=args.date_from,
-            date_to=args.date_to,
-            freq=args.freq,
-            min_nonzero_hours_per_series=args.min_nonzero_hours_per_series,
         )
         return 0
 
@@ -107,18 +83,6 @@ def dispatch(args, parser) -> int | None:
             include_train_in_score_plot=args.include_train_in_score_plot,
             zoom_to_eval=not args.no_zoom_to_eval,
             include_full_span_plot=not args.no_full_span_plot,
-            gt_eval=args.gt_eval,
-            gt_csv=args.gt_csv,
-        )
-        return 0
-
-    if args.timesnet_command == "gt-eval":
-        from models.TimesNet.runner import run_gt_eval as timesnet_gt_eval
-
-        timesnet_gt_eval(
-            run_id=args.run_id,
-            eval_split=args.eval_split,
-            gt_csv=args.gt_csv,
         )
         return 0
 

@@ -17,7 +17,7 @@ def compare_runs(model_name: str, runs: list[str], comparison_path_for: Callable
         path = comparison_path_for(run)
         if not path.exists():
             raise FileNotFoundError(f"comparison.json not found for run_id={run!r}: {path}")
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             payloads[run] = json.load(f)
 
     print(f"{model_name} comparison")
