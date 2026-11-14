@@ -7,9 +7,10 @@ Independent copy of Traffic Monitor focused on TimesNet. The source repository i
 - FastAPI backend, CSV importer, ClickHouse schema and Docker Compose.
 - TimesNet reconstruction pipeline, shared windowing/training utilities and related tests.
 - Generic forecasting viewer retained for later integration; TimesNet forecasting is not implemented yet.
+- Optional live PeMS 5-minute FTP → MQTT → ClickHouse bridge; see [app/live/README.md](app/live/README.md).
 
 ## Current limitations
-The importer loads one 5-minute station CSV into `traffic.traffic_5min`. The web API and TimesNet prepare step still read the old per-vehicle feature tables, so charts and training do not see this series yet. Calendar features and domain filters are still the inherited ones. Map fixtures are empty. Trained weights and secrets are not included. TimesNet reconstructs input windows; it does not forecast future traffic.
+The importer and TimesNet prepare step use the single-station `traffic.traffic_5min` table. The web API still reads the old per-vehicle feature tables, so its charts do not show this series yet. Calendar features and domain filters are still the inherited ones. Map fixtures are empty. Trained weights and secrets are not included. TimesNet reconstructs input windows; it does not forecast future traffic. PeMS station 1108617 and nearby CCTV C009 are documented in [app/live/README.md](app/live/README.md). A separate PeMS FTP account and ClickHouse credentials are required before the MQTT bridge can run against real data.
 
 ## Setup
 Copy `.env.example` to `.env` and set `CLICKHOUSE_DB=traffic` plus a ClickHouse user and password.
