@@ -1,4 +1,4 @@
-"""Shared constants for multivariate anomaly and forecasting pipelines."""
+"""Shared constants for multivariate TimesNet pipelines."""
 
 from __future__ import annotations
 
@@ -29,21 +29,41 @@ DEFAULT_CALENDAR_COLUMNS: list[str] = [
     "is_bridge_day",
     "is_long_weekend",
     "is_pre_long_weekend",
+    # Polish leftover. Always 0; kept so existing datasets keep their column set.
     "is_shopping_sunday",
-    "is_school_holiday",
     "is_school_break_morgan_hill",
-    "is_school_break_san_jose",
-    "is_college_break_gavilan",
-    "is_school_year_start",
-    "is_summer_vacation",
+    "is_school_break_oak_grove",
+    "is_school_break_east_side",
+    "is_gavilan_spring_break",
+    "is_gavilan_regular_semester",
+    "is_gavilan_summer_session",
 ]
 
 EXTENDED_CALENDAR_COLUMNS = DEFAULT_CALENDAR_COLUMNS.copy()
 
-SUPPORTED_THRESHOLD_METHODS = ("robust_z", "percentile")
+LOCAL_TZ = "America/Los_Angeles"
 
+STEP_MINUTES = {"15min": 15, "5min": 5}
+
+# Input window and forecast horizon default to 2 days and 1 day.
 DEFAULT_WINDOW_15MIN = 192
 DEFAULT_WINDOW_5MIN = 576
+DEFAULT_PRED_LEN_15MIN = 96
+DEFAULT_PRED_LEN_5MIN = 288
+
+
+def step_minutes(freq: str) -> int:
+    if freq not in STEP_MINUTES:
+        raise ValueError(f"Unsupported freq: {freq!r}")
+    return STEP_MINUTES[freq]
+
+
+def steps_per_hour(freq: str) -> int:
+    return 60 // step_minutes(freq)
+
+
+def steps_per_day(freq: str) -> int:
+    return 24 * steps_per_hour(freq)
 
 
 def default_window_for(freq: str) -> int:
@@ -51,4 +71,12 @@ def default_window_for(freq: str) -> int:
         return DEFAULT_WINDOW_15MIN
     if freq == "5min":
         return DEFAULT_WINDOW_5MIN
+    raise ValueError(f"Unsupported freq: {freq!r}")
+
+
+def default_pred_len_for(freq: str) -> int:
+    if freq == "15min":
+        return DEFAULT_PRED_LEN_15MIN
+    if freq == "5min":
+        return DEFAULT_PRED_LEN_5MIN
     raise ValueError(f"Unsupported freq: {freq!r}")

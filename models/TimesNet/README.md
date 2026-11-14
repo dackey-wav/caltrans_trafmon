@@ -1,62 +1,70 @@
 # TimesNet
 
-Joint multivariate anomaly-detection pipeline (`prepare -> train -> eval`).
+Traffic forecaster for one Caltrans station: `prepare -> train -> evaluate -> compare`.
 
-## GPU vs CPU
-
-Optional: `TIMESNET_DEVICE=cuda` or `TIMESNET_DEVICE=cpu`.
+The model reads the last `window` steps of flow, speed and occupancy and
+predicts the next `pred_len` steps of all three. Time marks (month, day,
+weekday, hour, minute in Los Angeles time plus calendar flags such as holidays
+and school breaks) cover the input window and the horizon, so the model knows
+in advance that tomorrow is a holiday.
 
 ## Workflow
 
 ```bash
-python -m app.cli timesnet prepare --date-from 2026-03-01 --date-to 2026-04-01
-python -m app.cli timesnet train --run-id <run_id>
-python -m app.cli timesnet eval --run-id <run_id> --threshold-profile balanced
+python -m app timesnet prepare --date-from 2022-08-01 --freq 15min --run-id ds15
+python -m app timesnet train --run-id ds15 --name base
+python -m app timesnet sweep --run-id ds15 --grid "window=192,672;d_model=64,128"
+python -m app timesnet compare --run-id ds15
 ```
 
-Scoring uses **window-mean reconstruction RMSE** on target columns (same objective as training).
-Re-run `eval` after scoring fixes; retrain only if you change model hyperparameters.
+`train` evaluates on the test split right after training. Re-run the scoring
+and plots on their own with `timesnet evaluate --run-id ds15 --name base`.
 
-## Threshold profiles
+Defaults: window 2 days, horizon 1 day (15min: 192 and 96 steps, 5min: 576
+and 288), Huber loss on robust-scaled targets, bf16 autocast on GPU.
+`--target weekly_residual` trains the correction to the same time last week
+and adds that week back at prediction time. The week-ago values of the whole
+horizon are fed in as inputs, since they are known when the forecast is made.
+`TIMESNET_DEVICE=cuda|cpu` overrides device selection.
 
-Default eval uses a **combined statistical gate** (percentile `q=0.999` AND
-robust-z `>= 6.0`) plus an hourly intensity gate:
+## Splits and masking
 
-- traffic intensity: `|actual - expected| / expected >= 20%` on flow, speed, or occupancy
+Rows split chronologically 70/15/15 on whole days. The scaler and the list of
+calendar marks come from train rows only; a calendar column that stays constant
+in train is dropped. Steps with `observed_percent < 100` count as inactive:
+the loss and all metrics skip them, and plots leave gaps there.
 
-Profiles (override robust-z only):
+## Evaluation
 
-- `balanced`: robust-z `threshold=6.0`
-- `strict`: percentile `quantile=0.9995`
-- `sensitive`: robust-z `threshold=5.0`
+Every test row serves as a forecast origin. The model competes with three
+baselines on the same cells:
 
-`anomalies.json` — domain-filtered output (plots + map).  
-`anomalies_stat.json` — combined statistical gate only (debug).
+- persistence: the last value repeated over the horizon
+- daily: the value 24 hours before each target step
+- weekly: the value 7 days before each target step
+
+`forecast_metrics_test.json` holds MAE and RMSE per channel overall, per lead
+step and per lead bucket (0-1h, 1-4h, 4-24h), flow in veh/h, skill against
+each baseline, and for 5min runs scores on 15-minute blocks so that 5min and
+15min experiments compare on equal terms.
 
 ## Artifacts
 
-`artifacts/anomaly/timesnet/{run_id}/` — `dataset.parquet`, `model.pt`, `scores.parquet`, `anomalies.json`, `comparison.json`, `plots/`.
-
-## Compare runs
-
-```bash
-python -m models.TimesNet.compare_runs --runs run_a,run_b
+```
+artifacts/forecast/timesnet/{run_id}/
+  dataset.parquet, dataset_meta.json
+  experiments/{name}/
+    model.pt, scaler.json, train_log.json
+    forecast_metrics_test.json, forecast_test.parquet
+    index.html                   report: summary, table, all plots
+    plots/train_curve.png        loss and val MAE per channel
+    plots/test_error_by_lead.png
+    plots/test_daily_overview.png
+    plots/test_first_week.png, test_last_week.png, test_worst_week.png,
+    plots/test_school_break_week.png
+    plots/test_example_NN.png    history plus 24h forecast from local midnight
+artifacts/forecast/timesnet/compare_test.csv
 ```
 
-## Regression harness
-
-1. Smoke: 3 locations, 7–14 days, `freq=1h`
-2. Hourly all locations
-3. 15-min stress (short range)
-## Per-location timelines (missing data)
-
-`prepare` writes `active__<location_id>` columns: a timestep is **active** only
-when that location has an observed bucket in ClickHouse. Hours outside the
-first/last span and **internal gaps** (e.g. a multi-month outage) are excluded
-from training loss, scoring, and plots. Gaps are forward-filled in the target
-tensor for the forward pass only; they are not treated as zero traffic.
-
-Train/val/test are assigned **per location** on active hours only (default
-70/15/15). After changing masking logic, re-run `prepare`, then `train`, then
-`eval`.
-
+Open `index.html` in a browser to see one experiment. `train_log.json` records
+`peak_gpu_gb`, epoch time and parameter count for sizing larger runs.

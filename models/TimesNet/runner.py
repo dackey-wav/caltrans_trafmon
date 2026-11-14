@@ -1,12 +1,16 @@
-"""Thin CLI-facing orchestration for the TimesNet pipeline."""
+"""Thin CLI-facing orchestration for the TimesNet forecasting pipeline."""
 
 from __future__ import annotations
 
-import json
+import csv
+import gc
+import itertools
 import time
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
+import torch
 
 from models.TimesNet import config as tc
 from models.TimesNet.data_prep import (
@@ -18,35 +22,63 @@ from models.TimesNet.data_prep import (
     save_meta,
     save_scaler,
 )
-from models.TimesNet.domain_filter import apply_domain_filter, domain_filter_summary
-from models.TimesNet.eval import build_anomaly_report, build_metrics_report, save_json
+from models.TimesNet.forecast_eval import (
+    BASELINES,
+    METHODS,
+    evaluate_forecast,
+    format_summary,
+    lead_label,
+    load_metrics,
+    save_metrics,
+    save_predictions,
+)
 from models.TimesNet.plots import (
-    plot_actual_with_anomalies,
-    plot_reconstruction_vs_actual,
-    plot_score_timeline,
+    pick_weeks,
+    plot_daily_overview,
+    plot_error_by_lead,
+    plot_example,
+    plot_period,
     plot_train_log,
+    write_index_html,
 )
 from models.TimesNet.train_timesnet import (
-    TrainSplits,
+    FeaturePlan,
+    SplitRows,
     _resolve_device,
-    annotate_combined,
-    calibrate_thresholds,
-    compute_scores,
     load_model,
+    load_train_log,
     save_model,
-    save_scores,
-    save_thresholds,
     save_train_log,
-    train_timesnet,
+    train_forecaster,
 )
-from models.utils.constants import DEFAULT_CALENDAR_COLUMNS, default_window_for
-from models.utils.multivariate_grid import (
-    extract_active_mask,
-    fit_robust_scaler_masked,
-    per_location_split_masks,
+from models.utils.constants import (
+    DEFAULT_CALENDAR_COLUMNS,
+    default_pred_len_for,
+    default_window_for,
+    steps_per_day,
+    steps_per_hour,
 )
-from models.utils.runner_common import filter_by_date_range, resolve_threshold_profile
-from models.utils.training import runtime_loader_defaults
+from models.utils.multivariate_grid import extract_active_mask
+
+SWEEP_KEYS = {
+    "window": int,
+    "pred_len": int,
+    "d_model": int,
+    "d_ff": int,
+    "e_layers": int,
+    "top_k": int,
+    "num_kernels": int,
+    "batch_size": int,
+    "learning_rate": float,
+    "dropout": float,
+    "loss": str,
+    "mark_set": str,
+    "target": str,
+    "weight_decay": float,
+    "epochs": int,
+    "seed": int,
+    "train_stride": int,
+}
 
 
 def run_prepare(
@@ -84,7 +116,9 @@ def run_prepare(
 def run_train(
     run_id: str,
     *,
+    name: str | None = None,
     window: int | None = None,
+    pred_len: int | None = None,
     epochs: int = tc.DEFAULT_EPOCHS,
     batch_size: int = tc.DEFAULT_BATCH_SIZE,
     learning_rate: float = tc.DEFAULT_LEARNING_RATE,
@@ -92,17 +126,17 @@ def run_train(
     val_fraction: float = tc.DEFAULT_VAL_FRACTION,
     test_fraction: float = tc.DEFAULT_TEST_FRACTION,
     d_model: int = tc.DEFAULT_D_MODEL,
-    d_ff: int = tc.DEFAULT_D_FF,
+    d_ff: int | None = None,
     e_layers: int = tc.DEFAULT_E_LAYERS,
     top_k: int = tc.DEFAULT_TOP_K,
     num_kernels: int = tc.DEFAULT_NUM_KERNELS,
     dropout: float = tc.DEFAULT_DROPOUT,
     seed: int = tc.DEFAULT_SEED,
-    num_workers: int | None = None,
-    pin_memory: bool | None = None,
-    persistent_workers: bool = tc.DEFAULT_PERSISTENT_WORKERS,
+    loss: str = tc.DEFAULT_LOSS,
+    mark_set: str = "full",
+    target_mode: str = "absolute",
+    train_stride: int = 1,
     use_amp: bool = tc.DEFAULT_USE_AMP,
-    use_rmse_loss: bool = tc.DEFAULT_USE_RMSE_LOSS,
     weight_decay: float = tc.DEFAULT_WEIGHT_DECAY,
     grad_clip_norm: float = tc.DEFAULT_GRAD_CLIP_NORM,
     log_every: int = tc.DEFAULT_LOG_EVERY,
@@ -112,50 +146,26 @@ def run_train(
     lr_scheduler_patience: int = tc.DEFAULT_LR_SCHEDULER_PATIENCE,
     lr_scheduler_factor: float = tc.DEFAULT_LR_SCHEDULER_FACTOR,
     lr_scheduler_min_lr: float = tc.DEFAULT_LR_SCHEDULER_MIN_LR,
-) -> None:
+    evaluate: bool = True,
+) -> str:
+    """Train one experiment on a prepared dataset; return the experiment name."""
     started = time.time()
-    print(f"[timesnet:train] run_id={run_id}")
-
     frame = load_dataset(tc.dataset_path(run_id))
     meta = load_meta(tc.dataset_meta_path(run_id))
+    freq = meta.freq
+    window = window or default_window_for(freq)
+    pred_len = pred_len or default_pred_len_for(freq)
+    d_ff = d_ff or 2 * d_model
+    name = name or tc.default_experiment_name(freq, window, pred_len, d_model)
+    print(f"[timesnet:train] run_id={run_id} experiment={name}")
 
-    if window is None:
-        window = default_window_for(meta.freq)
-
-    column_order = list(meta.target_columns) + list(meta.context_columns)
-    values = frame[column_order].to_numpy(dtype=np.float32)
-    active = extract_active_mask(frame, meta.target_columns)
-    train_m, _, _ = per_location_split_masks(
-        active, val_fraction=val_fraction, test_fraction=test_fraction
-    )
-    n_tgt = len(meta.target_columns)
-    n_ctx = len(meta.context_columns)
-    fit_mask = np.zeros((len(frame), len(column_order)), dtype=bool)
-    fit_mask[:, :n_tgt] = train_m & active
-    if n_ctx:
-        row_train = train_m.any(axis=1)
-        fit_mask[:, n_tgt:] = row_train[:, None]
-    scaler = fit_robust_scaler_masked(values, fit_mask)
-    save_scaler(scaler, columns=column_order, path=tc.scaler_path(run_id))
-
-    device = _resolve_device().type
-    num_workers, pin_memory = runtime_loader_defaults(
-        device,
-        num_workers,
-        pin_memory,
-        default_gpu_num_workers=tc.DEFAULT_GPU_NUM_WORKERS,
-        default_cpu_num_workers=tc.DEFAULT_CPU_NUM_WORKERS,
-        default_gpu_pin_memory=tc.DEFAULT_GPU_PIN_MEMORY,
-        default_cpu_pin_memory=tc.DEFAULT_CPU_PIN_MEMORY,
-    )
-
-    model, log, _splits = train_timesnet(
-        frame=frame,
-        target_columns=meta.target_columns,
-        context_columns=meta.context_columns,
-        scaler=scaler,
+    result = train_forecaster(
+        frame,
+        meta.target_columns,
+        meta.context_columns,
+        freq=freq,
         window=window,
-        data_freq=meta.freq,
+        pred_len=pred_len,
         epochs=epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,
@@ -169,11 +179,11 @@ def run_train(
         num_kernels=num_kernels,
         dropout=dropout,
         seed=seed,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        persistent_workers=persistent_workers,
+        loss=loss,
+        mark_set=mark_set,
+        target_mode=target_mode,
+        train_stride=train_stride,
         use_amp=use_amp,
-        use_rmse_loss=use_rmse_loss,
         weight_decay=weight_decay,
         grad_clip_norm=grad_clip_norm,
         log_every=log_every,
@@ -185,276 +195,287 @@ def run_train(
         lr_scheduler_min_lr=lr_scheduler_min_lr,
     )
 
-    model_path = save_model(model, tc.model_path(run_id))
-    log_path = save_train_log(log, tc.train_log_path(run_id))
-    plot_train_log(log, tc.plots_dir(run_id) / "train_curve.png")
-
-    elapsed = time.time() - started
+    log = result.log
+    log["run_id"] = run_id
+    log["experiment"] = name
+    log["train_seconds"] = round(time.time() - started, 1)
+    save_model(result.model, tc.model_path(run_id, name))
+    save_scaler(result.scaler, columns=result.plan.target_columns, path=tc.scaler_path(run_id, name))
+    log_path = save_train_log(log, tc.train_log_path(run_id, name))
+    plot_train_log(log, tc.plots_dir(run_id, name) / "train_curve.png")
     print(
-        f"[timesnet:train] epochs_run={log['epochs_run']} best_val_loss={log['best_val_loss']:.6f} "
-        f"device={log['device']} window={window} batch={log['hparams'].get('batch_size')}"
+        f"[timesnet:train] epochs_run={log['epochs_run']} best_epoch={log['best_epoch']} "
+        f"best_val_loss={log['best_val_loss']:.6f} params={log['n_parameters']:,} "
+        f"peak_gpu_gb={log['peak_gpu_gb']} train_s={log['train_seconds']}"
     )
-    print(f"[timesnet:train] model={model_path}")
     print(f"[timesnet:train] log={log_path}")
-    print(f"[timesnet:train] elapsed_s={elapsed:.2f}")
+
+    if evaluate:
+        run_evaluate(run_id, name)
+    return name
 
 
-def run_eval(
+def run_evaluate(
     run_id: str,
+    name: str,
     *,
-    threshold_method: str = tc.DEFAULT_THRESHOLD_METHOD,
-    threshold: float = tc.DEFAULT_ANOMALY_THRESHOLD,
-    quantile: float = tc.DEFAULT_THRESHOLD_QUANTILE,
-    threshold_profile: str | None = None,
-    combined_robust_z: float | None = None,
-    domain_filter: bool = True,
-    score_smoothing_span: int | None = tc.DEFAULT_SCORE_SMOOTHING_SPAN,
-    eval_split: str = "test",
-    max_records: int | None = 5000,
-    plot_top: int | None = None,
-    include_train_in_score_plot: bool = False,
-    zoom_to_eval: bool = True,
-    include_full_span_plot: bool = True,
-    date_from: str | None = None,
-    date_to: str | None = None,
-) -> None:
+    split: str = "test",
+    batch_size: int = tc.DEFAULT_EVAL_BATCH_SIZE,
+    n_examples: int = 6,
+) -> dict:
     started = time.time()
-    range_label = f" range={date_from or '*'}..{date_to or '*'}"
-    print(f"[timesnet:eval] run_id={run_id}{range_label if date_from or date_to else ''}")
-
     frame = load_dataset(tc.dataset_path(run_id))
     meta = load_meta(tc.dataset_meta_path(run_id))
-    scaler, _ = load_scaler(tc.scaler_path(run_id))
-    model = load_model(tc.model_path(run_id), data_freq=meta.freq)
+    log = load_train_log(tc.train_log_path(run_id, name))
+    plan = FeaturePlan.from_dict(log["feature_plan"])
+    splits = SplitRows.from_dict(log["splits"])
+    scaler, _ = load_scaler(tc.scaler_path(run_id, name))
+    model = load_model(tc.model_path(run_id, name))
+    freq = meta.freq
+    window = model.configs.seq_len
+    pred_len = model.configs.pred_len
+    rows = splits.rows(split)
+    device = _resolve_device()
 
-    with open(tc.train_log_path(run_id), encoding="utf-8") as f:
-        log = json.load(f)
-    hp = log["hparams"]
-    splits = TrainSplits(
-        train=tuple(log["splits"]["train"]),
-        val=tuple(log["splits"]["val"]),
-        test=tuple(log["splits"]["test"]),
-        window=int(hp["window"]),
-    )
-
-    scores = compute_scores(
-        model=model,
-        frame=frame,
-        target_columns=meta.target_columns,
-        context_columns=meta.context_columns,
-        scaler=scaler,
-        splits=splits,
-        data_freq=meta.freq,
-        batch_size=int(hp["batch_size"]),
-        num_workers=int(hp.get("num_workers", 0)),
-        pin_memory=bool(hp.get("pin_memory", False)),
-        persistent_workers=bool(hp.get("persistent_workers", True)),
-        use_amp=bool(hp.get("use_amp", False)),
-        score_smoothing_span=score_smoothing_span,
-        val_fraction=float(hp.get("val_fraction", tc.DEFAULT_VAL_FRACTION)),
-        test_fraction=float(hp.get("test_fraction", tc.DEFAULT_TEST_FRACTION)),
-    )
-    save_scores(scores, tc.scores_path(run_id))
-
-    threshold_method, threshold, quantile = resolve_threshold_profile(
-        threshold_profile,
-        threshold_method,
-        threshold,
-        quantile,
-        preset_resolver=tc.threshold_preset,
-    )
-    pct_quantile = (
-        float(quantile)
-        if threshold_profile and threshold_method == "percentile"
-        else tc.EVAL_PERCENTILE_QUANTILE
-    )
-    robust_z_gate = float(
-        combined_robust_z
-        if combined_robust_z is not None
-        else (threshold if threshold_profile and threshold_method == "robust_z" else tc.EVAL_COMBINED_ROBUST_Z)
-    )
-
-    thresholds_pct = calibrate_thresholds(
-        scores,
-        method="percentile",
-        quantile=pct_quantile,
-        calibration_split="train",
-    )
-    thresholds_robust = calibrate_thresholds(
-        scores,
-        method="robust_z",
-        threshold=robust_z_gate,
-        calibration_split="train",
-    )
-    save_thresholds(thresholds_pct, tc.thresholds_percentile_path(run_id))
-    save_thresholds(thresholds_robust, tc.thresholds_robust_path(run_id))
-    save_thresholds(thresholds_pct, tc.thresholds_path(run_id))
-
-    annotated_stat = annotate_combined(
-        scores,
-        thresholds_percentile=thresholds_pct,
-        thresholds_robust=thresholds_robust,
-        robust_z_confirm=robust_z_gate,
-    )
-    annotated = apply_domain_filter(annotated_stat, enabled=domain_filter)
-
-    plot_frame, plot_scores = filter_by_date_range(
+    result = evaluate_forecast(
+        model,
         frame,
-        annotated,
-        date_from=date_from,
-        date_to=date_to,
+        plan,
+        scaler,
+        freq=freq,
+        window=window,
+        pred_len=pred_len,
+        rows=rows,
+        split=split,
+        device=device,
+        batch_size=batch_size,
+        use_amp=bool(log["hparams"].get("use_amp")),
+        n_examples=n_examples,
     )
-    _, plot_scores_stat = filter_by_date_range(
-        frame,
-        annotated_stat,
-        date_from=date_from,
-        date_to=date_to,
-    )
-    if plot_scores.empty and (date_from or date_to):
-        raise ValueError(
-            f"No score rows in eval date range {date_from!r}..{date_to!r}. "
-            "Check --date-from/--date-to against the prepared dataset span."
+    metrics = result.metrics
+    metrics["run_id"] = run_id
+    metrics["experiment"] = name
+    save_metrics(metrics, tc.metrics_path(run_id, name, split))
+    save_predictions(result.predictions, tc.predictions_path(run_id, name, split))
+
+    out_dir = tc.experiment_dir(run_id, name)
+    pdir = tc.plots_dir(run_id, name)
+    active = extract_active_mask(frame, plan.target_columns)
+    channels = plan.channels
+    sph = steps_per_hour(freq)
+    spd = steps_per_day(freq)
+    near_lead = min(sph, pred_len)
+    plot_leads = [(near_lead, lead_label(freq, near_lead))]
+    if pred_len != near_lead:
+        plot_leads.append((pred_len, lead_label(freq, pred_len)))
+
+    overview = [
+        plot_error_by_lead(metrics, pdir / f"{split}_error_by_lead.png"),
+        plot_daily_overview(
+            frame, active, plan.target_columns, channels, result.predictions,
+            near_lead, plot_leads[0][1], rows[0], rows[1],
+            pdir / f"{split}_daily_overview.png",
+        ),
+    ]
+    week_imgs = []
+    for label, a, b in pick_weeks(frame, active, result.predictions, channels[0], near_lead, rows[0], rows[1], freq):
+        slug = label.replace(" ", "_")
+        week_imgs.append(
+            plot_period(
+                frame, active, plan.target_columns, channels, result.predictions,
+                plot_leads, a, b, 7 * spd,
+                f"{split}: {label}", pdir / f"{split}_{slug}.png",
+            )
         )
-
-    report_stat = build_anomaly_report(
-        annotated_scores=plot_scores_stat,
-        thresholds=thresholds_pct,
-        run_id=run_id,
-        scope="timesnet",
-        eval_split=eval_split,
-        max_records=max_records,
-        date_from=date_from,
-        date_to=date_to,
-        mode="combined",
-        domain_filter_enabled=False,
-    )
-    save_json(report_stat, tc.anomalies_stat_path(run_id))
-
-    anomaly_report = build_anomaly_report(
-        annotated_scores=plot_scores,
-        thresholds=thresholds_pct,
-        run_id=run_id,
-        scope="timesnet",
-        eval_split=eval_split,
-        max_records=max_records,
-        date_from=date_from,
-        date_to=date_to,
-        mode="domain" if domain_filter else "combined",
-        domain_filter_enabled=domain_filter,
-    )
-    save_json(anomaly_report, tc.anomalies_path(run_id))
-
-    eval_slice = plot_scores[plot_scores["split"] == eval_split]
-    n_stat = int(report_stat["summary"]["anomaly_count"])
-    n_domain = int(anomaly_report["summary"]["anomaly_count"])
-    filtered = n_stat - n_domain
-
-    metrics_report = build_metrics_report(
-        annotated_scores=plot_scores,
-        extra={
-            "model": "timesnet",
-            "freq": meta.freq,
-            "window": splits.window,
-            "n_targets": meta.n_targets,
-            "n_context": meta.n_context,
-            "threshold_method": "combined",
-            "threshold_profile": threshold_profile,
-            "percentile_quantile": pct_quantile,
-            "combined_robust_z": robust_z_gate,
-            "domain_filter": domain_filter,
-            "stat_summary": report_stat["summary"],
-            "domain_summary": anomaly_report["summary"],
-            "date_from": date_from,
-            "date_to": date_to,
-        },
-    )
-    save_json(metrics_report, tc.metrics_path(run_id))
-
-    split_map = {"val": ("val",), "test": ("test",)}
-    plot_score_timeline(
-        plot_scores,
-        tc.plots_dir(run_id) / "score",
-        max_series=plot_top,
-        splits_to_show=split_map.get(eval_split, ("test",)),
-        include_train=include_train_in_score_plot,
-    )
-
-    plot_actual_with_anomalies(
-        frame=plot_frame,
-        target_columns=list(meta.target_columns),
-        annotated_scores=plot_scores,
-        output_dir=tc.anomaly_plots_dir(run_id),
-        max_series=plot_top,
-        eval_split=eval_split,
-        zoom_to_eval=zoom_to_eval,
-        include_full_span_copy=include_full_span_plot,
-    )
-
-    recon_paths = plot_reconstruction_vs_actual(
-        frame=plot_frame,
-        target_columns=list(meta.target_columns),
-        annotated_scores=plot_scores,
-        output_dir=tc.reconstruction_plots_dir(run_id),
-        max_series=plot_top,
-        eval_split=eval_split,
-        zoom_to_eval=zoom_to_eval,
-        include_full_span_copy=include_full_span_plot,
-    )
-    if recon_paths:
-        print(
-            f"[timesnet:eval] reconstruction_plots={len(recon_paths)} → "
-            f"{tc.reconstruction_plots_dir(run_id)}"
+    example_imgs = [
+        plot_example(
+            frame, active, plan.target_columns, channels, ex,
+            history_steps=min(window, spd), steps_day=spd,
+            out_path=pdir / f"{split}_example_{k:02d}.png",
         )
+        for k, ex in enumerate(result.examples)
+    ]
+    train_curve = pdir / "train_curve.png"
+    if not train_curve.exists():
+        plot_train_log(log, train_curve)
 
-    per_series = anomaly_report.get("per_series", [])
-    top_series = sorted(per_series, key=lambda r: r.get("rate", 0.0), reverse=True)[:10]
-    comparison_payload = {
+    summary = format_summary(metrics)
+    header = ["lead", "channel", *METHODS, "skill vs weekly"]
+    table = []
+    for bucket, row in metrics["by_lead_bucket"].items():
+        for ch in channels:
+            vals = [row[m][ch]["mae"] for m in METHODS]
+            mm, mw = vals[0], vals[METHODS.index("weekly")]
+            skill = "" if (mm is None or not mw) else f"{1 - mm / mw:+.1%}"
+            table.append([bucket, ch, *("n/a" if v is None else f"{v:.4g}" for v in vals), skill])
+    index = write_index_html(
+        out_dir,
+        f"TimesNet {run_id} / {name}",
+        [
+            ("Training", [train_curve]),
+            ("Errors and overview", overview),
+            ("Weeks (actual, model, weekly baseline)", week_imgs),
+            ("Forecast examples", example_imgs),
+        ],
+        summary + "\n\nTable: MAE in original units by lead bucket.",
+        table_rows=table,
+        table_header=header,
+    )
+    print(f"[timesnet:eval] {summary}")
+    print(f"[timesnet:eval] report={index}")
+    print(f"[timesnet:eval] elapsed_s={time.time() - started:.1f}")
+    return metrics
+
+
+def _fmt(value, spec: str = ".4g") -> str:
+    if value is None or (isinstance(value, float) and not np.isfinite(value)):
+        return ""
+    return format(value, spec)
+
+
+def _experiment_row(run_id: str, exp_dir: Path, split: str) -> dict | None:
+    metrics_file = exp_dir / f"forecast_metrics_{split}.json"
+    log_file = exp_dir / "train_log.json"
+    if not metrics_file.exists() or not log_file.exists():
+        return None
+    m = load_metrics(metrics_file)
+    log = load_train_log(log_file)
+    hp = log.get("hparams", {})
+    sph = 60 // m["step_minutes"]
+    ch = m["channels"]
+
+    def model_mae(channel: str, bucket: str | None = None):
+        if channel not in ch:
+            return None
+        src = m["by_lead_bucket"].get(bucket) if bucket else m["overall"]
+        return None if src is None else src["model"][channel]["mae"]
+
+    blocks = m.get("blocks_15min")
+    flow_15 = (
+        blocks["model"]["flow"]["mae"] if blocks and "flow" in ch else model_mae("flow")
+    )
+    flow_15_weekly = (
+        blocks["weekly"]["flow"]["mae"] if blocks and "flow" in ch
+        else (m["overall"]["weekly"]["flow"]["mae"] if "flow" in ch else None)
+    )
+    def to_hourly(v):
+        return None if v is None else v * sph
+
+    return {
         "run_id": run_id,
-        "eval_split": eval_split,
-        "threshold": {
-            "method": "combined",
-            "profile": threshold_profile,
-            "percentile_quantile": pct_quantile,
-            "combined_robust_z": robust_z_gate,
-            "domain_filter": domain_filter,
-        },
-        "summary_stat": report_stat["summary"],
-        "summary_domain": anomaly_report["summary"],
-        "top_series_by_rate": top_series,
-        "score_quantiles_by_split": {
-            row["split"]: {
-                "p95": row["score_p95"],
-                "p99": row["score_p99"],
-                "anomaly_rate": row["anomaly_rate"],
-            }
-            for row in metrics_report["splits"]
-        },
+        "experiment": exp_dir.name,
+        "freq": m["freq"],
+        "window": m["window"],
+        "pred_len": m["pred_len"],
+        "d_model": hp.get("d_model"),
+        "e_layers": hp.get("e_layers"),
+        "loss": hp.get("loss"),
+        "mark_set": hp.get("mark_set", "full"),
+        "target": hp.get("target_mode", "absolute"),
+        "learning_rate": hp.get("learning_rate"),
+        "params": log.get("n_parameters"),
+        "best_epoch": log.get("best_epoch"),
+        "train_s": log.get("train_seconds"),
+        "peak_gpu_gb": log.get("peak_gpu_gb"),
+        "flow_mae_15min_block": flow_15,
+        "flow_mae_15min_block_weekly": flow_15_weekly,
+        "flow_mae_vph": to_hourly(model_mae("flow")),
+        "flow_mae_vph_0_1h": to_hourly(model_mae("flow", "0-1h")),
+        "flow_mae_vph_4_24h": to_hourly(model_mae("flow", "4-24h")),
+        "speed_mae_mph": model_mae("speed"),
+        "occupancy_mae": model_mae("occupancy"),
+        "skill_flow_vs_weekly": m["skill_vs_weekly"].get("flow"),
+        "skill_speed_vs_weekly": m["skill_vs_weekly"].get("speed"),
     }
-    save_json(comparison_payload, tc.comparison_path(run_id))
 
-    elapsed = time.time() - started
-    summary = anomaly_report["summary"]
-    dom = domain_filter_summary(eval_slice) if domain_filter else {}
-    print(
-        f"[timesnet:eval] eval_split={eval_split} combined "
-        f"(q={pct_quantile}, z>={robust_z_gate}) "
-        f"profile={threshold_profile or '-'}"
-    )
-    print(
-        f"[timesnet:eval] stat_flagged={n_stat} domain_flagged={n_domain} "
-        f"filtered={filtered} of {summary['point_count']} eval points "
-        f"({summary['anomaly_rate'] * 100:.2f}%) series={summary['series_count']}"
-    )
-    if domain_filter and dom.get("by_kind"):
-        print(f"[timesnet:eval] domain_kinds={dom['by_kind']}")
-    for row in metrics_report["splits"]:
-        print(
-            f"[timesnet:eval] split={row['split']:<5} points={row['points']} "
-            f"anomaly_rate={row['anomaly_rate'] * 100:.2f}% "
-            f"score_p95={row['score_p95']:.4f} score_p99={row['score_p99']:.4f}"
-        )
-    print(f"[timesnet:eval] anomalies={tc.anomalies_path(run_id)}")
-    print(f"[timesnet:eval] anomalies_stat={tc.anomalies_stat_path(run_id)}")
-    print(f"[timesnet:eval] scores={tc.scores_path(run_id)}")
-    print(f"[timesnet:eval] comparison={tc.comparison_path(run_id)}")
-    print(f"[timesnet:eval] elapsed_s={elapsed:.2f}")
+
+def run_compare(run_ids: Sequence[str], *, split: str = "test", out_csv: Path | None = None) -> list[dict]:
+    rows: list[dict] = []
+    for run_id in run_ids:
+        root = tc.experiments_root(run_id)
+        if not root.exists():
+            print(f"[timesnet:compare] no experiments under {root}")
+            continue
+        for exp_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+            row = _experiment_row(run_id, exp_dir, split)
+            if row is not None:
+                rows.append(row)
+    if not rows:
+        print("[timesnet:compare] nothing to compare")
+        return rows
+    rows.sort(key=lambda r: (r["flow_mae_15min_block"] is None, r["flow_mae_15min_block"] or 0.0))
+
+    cols = [
+        ("experiment", "s"), ("freq", "s"), ("window", "d"), ("pred_len", "d"), ("d_model", "d"),
+        ("mark_set", "s"), ("target", "s"), ("learning_rate", "g"), ("best_epoch", "d"), ("params", ","), ("train_s", ".0f"), ("peak_gpu_gb", ".2f"),
+        ("flow_mae_15min_block", ".2f"), ("flow_mae_15min_block_weekly", ".2f"),
+        ("flow_mae_vph_0_1h", ".1f"), ("flow_mae_vph_4_24h", ".1f"),
+        ("speed_mae_mph", ".2f"), ("occupancy_mae", ".4f"),
+        ("skill_flow_vs_weekly", "+.1%"), ("skill_speed_vs_weekly", "+.1%"),
+    ]
+    table = [[c for c, _ in cols]]
+    for r in rows:
+        table.append([
+            str(r[c]) if spec == "s" else _fmt(r[c], spec) for c, spec in cols
+        ])
+    widths = [max(len(row[i]) for row in table) for i in range(len(cols))]
+    for row in table:
+        print("  ".join(cell.rjust(w) for cell, w in zip(row, widths, strict=False)))
+
+    out_csv = Path(out_csv) if out_csv else tc.ARTIFACTS_ROOT / f"compare_{split}.csv"
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"[timesnet:compare] baselines in every report: {', '.join(BASELINES)}")
+    print(f"[timesnet:compare] csv={out_csv}")
+    return rows
+
+
+def parse_grid(spec: str) -> dict[str, list]:
+    """Parse ``"window=96,192;d_model=64,128"`` into a dict of value lists."""
+    grid: dict[str, list] = {}
+    for part in spec.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" not in part:
+            raise ValueError(f"Bad grid item {part!r}; expected key=v1,v2")
+        key, values = part.split("=", 1)
+        key = key.strip()
+        if key not in SWEEP_KEYS:
+            raise ValueError(f"Unsupported grid key {key!r}; allowed: {sorted(SWEEP_KEYS)}")
+        cast = SWEEP_KEYS[key]
+        grid[key] = [cast(v.strip()) for v in values.split(",") if v.strip()]
+    if not grid:
+        raise ValueError("Empty grid")
+    return grid
+
+
+def run_sweep(run_id: str, grid: dict[str, list], *, prefix: str = "sweep", **train_kwargs) -> list[str]:
+    keys = list(grid)
+    combos = list(itertools.product(*(grid[k] for k in keys)))
+    print(f"[timesnet:sweep] run_id={run_id} experiments={len(combos)} grid={grid}")
+    done: list[str] = []
+    for i, combo in enumerate(combos, start=1):
+        params = dict(zip(keys, combo, strict=True))
+        call_params = {"target_mode" if k == "target" else k: v for k, v in params.items()}
+        tag = "_".join(f"{k}{v}" for k, v in params.items())
+        name = f"{prefix}_{tag}"
+        if (tc.experiments_root(run_id) / name / "forecast_metrics_test.json").exists():
+            print(f"[timesnet:sweep] [{i}/{len(combos)}] skip {name}: already evaluated")
+            done.append(name)
+            continue
+        print(f"[timesnet:sweep] [{i}/{len(combos)}] {name}")
+        try:
+            run_train(run_id, name=name, **{**train_kwargs, **call_params})
+            done.append(name)
+        except Exception as exc:
+            print(f"[timesnet:sweep] FAILED {name}: {type(exc).__name__}: {exc}")
+        finally:
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+    run_compare([run_id])
+    return done

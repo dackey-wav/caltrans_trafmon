@@ -27,65 +27,9 @@ def run_dir(artifacts_root: Path, run_id: str) -> Path:
     return path
 
 
-def plots_dir(artifacts_root: Path, run_id: str) -> Path:
-    path = run_dir(artifacts_root, run_id) / "plots"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def anomaly_plots_dir(artifacts_root: Path, run_id: str) -> Path:
-    path = plots_dir(artifacts_root, run_id) / "anomalies"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def class_summary_plots_dir(artifacts_root: Path, run_id: str) -> Path:
-    path = plots_dir(artifacts_root, run_id) / "class_summary"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def reconstruction_plots_dir(artifacts_root: Path, run_id: str) -> Path:
-    path = plots_dir(artifacts_root, run_id) / "reconstruction"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def dataset_path(artifacts_root: Path, run_id: str, *, ext: str = "parquet") -> Path:
     return run_dir(artifacts_root, run_id) / f"dataset.{ext}"
 
 
 def dataset_meta_path(artifacts_root: Path, run_id: str) -> Path:
     return run_dir(artifacts_root, run_id) / "dataset_meta.json"
-
-
-def scaler_path(artifacts_root: Path, run_id: str) -> Path:
-    return run_dir(artifacts_root, run_id) / "scaler.json"
-
-
-def model_path(artifacts_root: Path, run_id: str) -> Path:
-    return run_dir(artifacts_root, run_id) / "model.pt"
-
-
-def train_log_path(artifacts_root: Path, run_id: str) -> Path:
-    return run_dir(artifacts_root, run_id) / "train_log.json"
-
-
-def scores_path(artifacts_root: Path, run_id: str) -> Path:
-    return run_dir(artifacts_root, run_id) / "scores.parquet"
-
-
-def thresholds_path(artifacts_root: Path, run_id: str) -> Path:
-    return run_dir(artifacts_root, run_id) / "thresholds.json"
-
-
-def anomalies_path(artifacts_root: Path, run_id: str) -> Path:
-    return run_dir(artifacts_root, run_id) / "anomalies.json"
-
-
-def metrics_path(artifacts_root: Path, run_id: str) -> Path:
-    return run_dir(artifacts_root, run_id) / "metrics.json"
-
-
-def comparison_path(artifacts_root: Path, run_id: str) -> Path:
-    return run_dir(artifacts_root, run_id) / "comparison.json"

@@ -1,4 +1,4 @@
-"""CLI for CSV import and TimesNet prepare/train/eval."""
+"""CLI for CSV import and TimesNet prepare/train."""
 
 from __future__ import annotations
 

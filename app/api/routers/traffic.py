@@ -13,7 +13,6 @@ from app.api.regions import (
     group_locations,
 )
 from app.api.traffic_range import resolve_traffic_window
-from app.api.vehicle_classes import api_class_metadata, class_color, class_label
 from app.core.datasets import FEATURE_TABLES_BY_DATASET, get_dataset, list_datasets
 from app.core.db import ClickHouseDB
 
@@ -135,7 +134,6 @@ def get_datasets():
         "datasets": datasets_out,
         "range_presets": RANGE_PRESETS,
         "max_points_hint": MAX_POINTS_HINT,
-        "vehicle_classes": api_class_metadata(),
     }
 
 
@@ -211,101 +209,5 @@ def get_traffic(
             "date_to": params.date_to,
             "points": len(timestamps),
             "series_count": len(series),
-        },
-    }
-
-
-@router.get("/api/traffic/classes")
-def get_traffic_by_class(
-    dataset: str = Query(..., description="Dataset id: dataset-a | dataset-b"),
-    stations: str = Query(
-        ...,
-        description="Comma-separated location_id values (one station; all lanes aggregated)",
-    ),
-    date_from: str | None = Query(None, description="UTC start YYYY-MM-DD HH:MM:SS"),
-    date_to: str | None = Query(None, description="UTC end YYYY-MM-DD HH:MM:SS"),
-    range_preset: str | None = Query(
-        None,
-        description="Window preset: 15m | 1h | 1d | 7d | 30d",
-    ),
-    resolution: str | None = Query(
-        None,
-        description="Bucket: 15min | 1h | 6h | 1d",
-    ),
-):
-    get_dataset(dataset)
-    params = _resolve_query(
-        dataset=dataset,
-        stations=stations,
-        date_from=date_from,
-        date_to=date_to,
-        range_preset=range_preset,
-        resolution=resolution,
-    )
-    if params is None:
-        return {"timestamps": [], "classes": [], "series": {}, "meta": {}}
-
-    query = f"""
-        SELECT
-            {params.bucket} AS ds,
-            vehicle_class,
-            count() AS volume
-        FROM {cfg.DB_NAME}.{params.table}
-        WHERE location_id IN ({params.locations_sql})
-          AND time_utc >= toDateTime('{params.date_from}', 'UTC')
-          AND time_utc <= toDateTime('{params.date_to}', 'UTC')
-        GROUP BY ds, vehicle_class
-        ORDER BY ds, vehicle_class
-    """
-    df = pd.DataFrame(
-        _query_rows(query),
-        columns=["ds", "vehicle_class", "volume"],
-    )
-    if df.empty:
-        return {
-            "timestamps": [],
-            "classes": [],
-            "series": {},
-            "meta": {
-                "dataset": dataset,
-                "resolution": params.resolution,
-                "date_from": params.date_from,
-                "date_to": params.date_to,
-                "points": 0,
-            },
-        }
-
-    df["ds"] = pd.to_datetime(df["ds"], utc=True)
-    df["vehicle_class"] = df["vehicle_class"].astype(int)
-    wide = _downsample_wide(
-        df.pivot(index="ds", columns="vehicle_class", values="volume").fillna(0)
-    )
-    class_totals = wide.sum(axis=0).sort_values(ascending=False)
-    class_ids = [int(class_id) for class_id in class_totals.index if class_totals[class_id] > 0]
-    if not class_ids:
-        class_ids = [int(class_id) for class_id in wide.columns]
-
-    timestamps = [timestamp.strftime("%Y-%m-%d %H:%M") for timestamp in wide.index]
-    series = {
-        str(class_id): wide[class_id].astype(int).tolist()
-        for class_id in class_ids
-        if class_id in wide.columns
-    }
-
-    return {
-        "timestamps": timestamps,
-        "classes": class_ids,
-        "series": series,
-        "class_labels": {str(class_id): class_label(class_id) for class_id in class_ids},
-        "class_colors": {str(class_id): class_color(class_id) for class_id in class_ids},
-        "meta": {
-            "dataset": dataset,
-            "resolution": params.resolution,
-            "range_preset": range_preset,
-            "date_from": params.date_from,
-            "date_to": params.date_to,
-            "points": len(timestamps),
-            "class_count": len(class_ids),
-            "station_count": len(params.locations),
         },
     }

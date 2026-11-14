@@ -40,6 +40,7 @@ from models.utils.multivariate_grid import (
     fill_gap_values_in_span,
     list_active_columns,
 )
+from models.utils.school_calendar import SCHOOL_CALENDAR_COLUMNS, build_school_calendar
 
 
 @dataclass
@@ -177,17 +178,12 @@ def _build_day_calendar(day_index: pd.DatetimeIndex) -> pd.DataFrame:
         -1, fill_value=False
     )
 
-    # Date ranges for local school breaks are not defined yet.
-    for column in (
-        "is_shopping_sunday",
-        "is_school_holiday",
-        "is_school_break_morgan_hill",
-        "is_school_break_san_jose",
-        "is_college_break_gavilan",
-        "is_school_year_start",
-        "is_summer_vacation",
-    ):
-        cal[column] = False
+    # Polish leftover. No shopping-Sunday rule exists here, so it stays 0.
+    cal["is_shopping_sunday"] = False
+
+    school = build_school_calendar(day_index)
+    for column in SCHOOL_CALENDAR_COLUMNS:
+        cal[column] = school[column]
 
     return cal
 
@@ -264,12 +260,7 @@ def _calendar_columns(index: pd.DatetimeIndex, columns: Sequence[str]) -> pd.Dat
         "is_long_weekend",
         "is_pre_long_weekend",
         "is_shopping_sunday",
-        "is_school_holiday",
-        "is_school_break_morgan_hill",
-        "is_school_break_san_jose",
-        "is_college_break_gavilan",
-        "is_school_year_start",
-        "is_summer_vacation",
+        *SCHOOL_CALENDAR_COLUMNS,
     }
     if holiday_feats & requested:
         local_days = local.tz_localize(None).normalize()

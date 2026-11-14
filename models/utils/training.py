@@ -35,21 +35,3 @@ def cuda_capability_line() -> str:
         return f"torch={torch.__version__} cuda={torch.version.cuda} device0={name!r}"
     except Exception:
         return f"torch={torch.__version__} cuda={torch.version.cuda}"
-
-
-def runtime_loader_defaults(
-    device: str,
-    num_workers: int | None,
-    pin_memory: bool | None,
-    *,
-    default_gpu_num_workers: int,
-    default_cpu_num_workers: int,
-    default_gpu_pin_memory: bool,
-    default_cpu_pin_memory: bool,
-) -> tuple[int, bool]:
-    is_gpu = device == "cuda"
-    if num_workers is None:
-        num_workers = default_gpu_num_workers if is_gpu else default_cpu_num_workers
-    if pin_memory is None:
-        pin_memory = default_gpu_pin_memory if is_gpu else default_cpu_pin_memory
-    return int(num_workers), bool(pin_memory)
