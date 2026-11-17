@@ -103,14 +103,68 @@ services:
     networks:
       - traffic-net
 
+  # MQTT broker shared by the live PeMS bridge (profile live) and the IoT demo
+  # (profile iot). Port 1883 is open to the LAN so a second machine can run
+  # one of the nodes; see app/iot/README.md before exposing it.
   mqtt:
     image: eclipse-mosquitto:2.0
-    profiles: [live]
+    profiles: [live, iot]
     ports:
-      - "127.0.0.1:1883:1883"
+      - "1883:1883"
+      - "9001:9001"
     volumes:
-      - ./app/live/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./app/iot/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mqtt_data:/mosquitto/data
+    networks:
+      - traffic-net
+
+  # IoT demo, device 1: replays a downloaded station CSV as a live 5-minute feed.
+  sensor-emulator:
+    build:
+      context: .
+      dockerfile: app/live/Dockerfile
+    profiles: [iot]
+    command: ["python", "-m", "app.iot.sensor_emulator"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      STATION_ID: ${IOT_STATION_ID:-400237}
+      REPLAY_CSV: /data/${IOT_REPLAY_FILE:-400237_5min.csv.gz}
+      REPLAY_START: ${IOT_REPLAY_START:-2025-06-02T00:00}
+      REPLAY_END: ${IOT_REPLAY_END:-}
+      REPLAY_WARMUP_HOURS: ${IOT_REPLAY_WARMUP_HOURS:-192}
+      REPLAY_SPEED: ${IOT_REPLAY_SPEED:-300}
+      REPLAY_DROP_RATE: ${IOT_REPLAY_DROP_RATE:-0}
+      REPLAY_WAIT_PREDICTOR: ${IOT_REPLAY_WAIT_PREDICTOR:-120}
+      MQTT_HOST: ${IOT_MQTT_HOST:-mqtt}
+      MQTT_PORT: ${IOT_MQTT_PORT:-1883}
+      MQTT_USERNAME: ${IOT_MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${IOT_MQTT_PASSWORD:-}
+    volumes:
+      - ${IOT_DATA_DIR:-./data/stations}:/data:ro
+    depends_on: [mqtt]
+    networks:
+      - traffic-net
+
+  # IoT demo, device 2: forecasts the feed with TimesNet and checks it against the facts.
+  predictor:
+    build:
+      context: .
+      dockerfile: app/iot/Dockerfile.predictor
+    profiles: [iot]
+    restart: unless-stopped
+    command: ["python", "-m", "app.iot.predictor"]
+    environment:
+      STATION_ID: ${IOT_STATION_ID:-400237}
+      MODEL_DIR: /workspace/artifacts/forecast/timesnet/${IOT_MODEL:-ds15/experiments/sweep_window192_mark_setcompact_learning_rate0.0001}
+      OUTPUT_DIR: /workspace/artifacts/iot
+      ANOMALY_Z: ${IOT_ANOMALY_Z:-6}
+      MQTT_HOST: ${IOT_MQTT_HOST:-mqtt}
+      MQTT_PORT: ${IOT_MQTT_PORT:-1883}
+      MQTT_USERNAME: ${IOT_MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${IOT_MQTT_PASSWORD:-}
+    volumes:
+      - ./artifacts:/workspace/artifacts
+    depends_on: [mqtt]
     networks:
       - traffic-net
 

@@ -54,3 +54,6 @@ app/frontend/dist/
 .pytest_cache/
 .ruff_cache/
 .migration-tools/
+
+# Station CSVs replayed by the IoT sensor emulator
+data/
