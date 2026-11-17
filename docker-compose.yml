@@ -103,10 +103,63 @@ services:
     networks:
       - traffic-net
 
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    profiles: [live]
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./app/live/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt_data:/mosquitto/data
+    networks:
+      - traffic-net
+
+  pems-publisher:
+    build:
+      context: .
+      dockerfile: app/live/Dockerfile
+    profiles: [live]
+    restart: unless-stopped
+    command: ["python", "-m", "app.live.publisher"]
+    environment:
+      PEMS_STATION_ID: ${PEMS_STATION_ID:-}
+      PEMS_SOURCE_MODE: ${PEMS_SOURCE_MODE:-ftp}
+      PEMS_FTP_HOST: ${PEMS_FTP_HOST:-pems.dot.ca.gov}
+      PEMS_FTP_USER: ${PEMS_FTP_USER:-}
+      PEMS_FTP_PASSWORD: ${PEMS_FTP_PASSWORD:-}
+      PEMS_FTP_TLS: ${PEMS_FTP_TLS:-1}
+      PEMS_DISTRICT: ${PEMS_DISTRICT:-11}
+      PEMS_SOURCE_URL: ${PEMS_SOURCE_URL:-}
+      PEMS_HTTP_COOKIE: ${PEMS_HTTP_COOKIE:-}
+      PEMS_POLL_SECONDS: ${PEMS_POLL_SECONDS:-300}
+      MQTT_HOST: mqtt
+    depends_on: [mqtt]
+    networks:
+      - traffic-net
+
+  pems-consumer:
+    build:
+      context: .
+      dockerfile: app/live/Dockerfile
+    profiles: [live]
+    restart: unless-stopped
+    command: ["python", "-m", "app.live.consumer"]
+    environment:
+      PEMS_STATION_ID: ${PEMS_STATION_ID:-}
+      MQTT_HOST: mqtt
+      DB_HOST: clickhouse
+      PORT: "8123"
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    depends_on: [mqtt, clickhouse]
+    networks:
+      - traffic-net
+
 volumes:
   ch_data:
   ch_logs:
   frontend_node_modules:
+  mqtt_data:
 
 networks:
   traffic-net:
