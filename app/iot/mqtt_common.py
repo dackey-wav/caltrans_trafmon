@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
+from collections.abc import Callable
 
 import paho.mqtt.client as mqtt
 
@@ -15,7 +17,7 @@ def connect_client(
     client_id: str,
     *,
     will: tuple[str, str] | None = None,
-    birth: tuple[str, str] | None = None,
+    birth: tuple[str, str | Callable[[], str]] | None = None,
     subscriptions: list[tuple[str, int]] | None = None,
     clean_session: bool = True,
     manual_ack: bool = False,
@@ -58,7 +60,8 @@ def connect_client(
             # Re-announce on every connect: a session takeover after a crash
             # makes the broker publish the old connection's Will ("offline")
             # after we are already back.
-            c.publish(birth[0], birth[1], qos=1, retain=True)
+            payload = birth[1]() if callable(birth[1]) else birth[1]
+            c.publish(birth[0], payload, qos=1, retain=True)
         LOG.info("connected to broker as %s; subscribed %s", client_id, [t for t, _ in subs])
         connected.set()
 
@@ -75,3 +78,21 @@ def connect_client(
         client.loop_stop()
         raise ConnectionError(f"no MQTT broker at {host}:{port} after {timeout:.0f}s")
     return client
+
+
+def go_offline(client: mqtt.Client) -> None:
+    """Simulated network outage: leave the broker and stop the network loop."""
+    client.disconnect()
+    client.loop_stop()
+
+
+def go_online(client: mqtt.Client) -> None:
+    """End a simulated outage; on_connect re-subscribes and re-announces the node."""
+    while True:
+        try:
+            client.reconnect()
+            break
+        except OSError as exc:
+            LOG.warning("reconnect failed (%s); retrying", exc)
+            time.sleep(2)
+    client.loop_start()

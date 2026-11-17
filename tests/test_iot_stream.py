@@ -112,6 +112,21 @@ def test_restarted_source_resets_state_and_snapshot_round_trips(tmp_path):
     assert restored.resets == 1 and closed == [START] and len(restored.history) == 1
 
 
+def test_new_replay_session_clears_state_and_dashboard_history(tmp_path):
+    state = StreamState()
+    for i in range(6):
+        state.ingest(msg(START + pd.Timedelta(minutes=5 * i)) | {"session": "a"})
+    state.recent.append({"t": "x"})
+    path = tmp_path / "s.pkl"
+    state.save(path)
+    restored = StreamState.load(path)
+    assert restored.session == "a" and list(restored.recent) == [{"t": "x"}]
+    # the dashboard started a new session at a later date: fresh state, no resets of counters
+    restored.ingest(msg(START + pd.Timedelta(days=30)) | {"session": "b"})
+    assert restored.session == "b" and restored.resets == 1
+    assert len(restored.history) == 0 and len(restored.recent) == 0
+
+
 def test_window_requires_enough_history():
     state = StreamState()
     feed(state, 9)

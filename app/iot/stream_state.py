@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import pickle
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +22,7 @@ import pandas as pd
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
 STREAM_RESET_AFTER = pd.Timedelta(hours=1)
+RECENT_BUCKETS = 192  # two days of 15-minute buckets
 CHANNELS = ("flow", "speed", "occupancy")
 SOURCE = {"flow": "flow_veh_5min", "speed": "speed_mph", "occupancy": "occupancy_fraction"}
 LEAD_BUCKETS = (("0-1h", 1, 4), ("1-4h", 5, 16), ("4-24h", 17, 96))
@@ -129,6 +130,7 @@ class StreamState:
         self.duplicates = 0
         self.received = 0
         self.resets = 0
+        self.session: str | None = None
         self.reset()
 
     def reset(self) -> None:
@@ -137,6 +139,9 @@ class StreamState:
         self.last_ts: pd.Timestamp | None = None
         self.forecasts: OrderedDict[pd.Timestamp, pd.DataFrame] = OrderedDict()
         self.errors = RunningError()
+        # Compact evaluated buckets for dashboards; part of the snapshot so a
+        # restarted predictor still serves the full two days.
+        self.recent: deque = deque(maxlen=RECENT_BUCKETS)
 
     # -- persistence ----------------------------------------------------
     def save(self, path: Path) -> None:
@@ -160,7 +165,14 @@ class StreamState:
     def ingest(self, data: dict) -> list[pd.Timestamp]:
         """Add one 5-minute message; return the buckets it closed (oldest first)."""
         ts = parse_message_time(data)
-        if self.last_ts is not None and ts < self.last_ts - STREAM_RESET_AFTER:
+        session = data.get("session")
+        if session and session != self.session:
+            # A new replay session (dashboard reset): start from scratch.
+            if self.session is not None:
+                self.resets += 1
+            self.reset()
+            self.session = session
+        elif self.last_ts is not None and ts < self.last_ts - STREAM_RESET_AFTER:
             # The source started over (e.g. the replay was restarted), not a late retry.
             self.reset()
             self.resets += 1

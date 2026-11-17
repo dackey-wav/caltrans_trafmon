@@ -48,11 +48,6 @@ DEFAULT_LR_SCHEDULER_MIN_LR = 1e-6
 
 DEFAULT_EVAL_BATCH_SIZE = 512
 
-# Read by app/api/models_local.py to browse artifacts from older runs. The
-# TimesNet CLI no longer uses them.
-EVAL_COMBINED_ROBUST_Z = 6.0
-EVAL_COMBINED_ALERT_Z = 8.0
-
 ARTIFACTS_ROOT = art.repo_artifacts_base() / "forecast" / "timesnet"
 
 default_run_id = art.default_run_id

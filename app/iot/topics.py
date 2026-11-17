@@ -15,8 +15,13 @@ def station_status(station_id: str) -> str:
     return f"{ROOT}/stations/{station_id}/status"
 
 
+def replay(station_id: str) -> str:
+    """Retained replay state: session, simulated clock, speed, phase."""
+    return f"{ROOT}/stations/{station_id}/replay"
+
+
 def control(station_id: str) -> str:
-    """Commands to the sensor node: pause, resume, speed."""
+    """Commands to the sensor node: pause, resume, speed, reset, outage, loss."""
     return f"{ROOT}/stations/{station_id}/control"
 
 
@@ -30,5 +35,20 @@ def evaluation(station_id: str) -> str:
     return f"{ROOT}/stations/{station_id}/evaluation"
 
 
+def history(station_id: str) -> str:
+    """Retained last two days of evaluations, so a dashboard can draw at once."""
+    return f"{ROOT}/stations/{station_id}/history"
+
+
+def metrics(station_id: str) -> str:
+    """Retained running counters and errors of the predictor."""
+    return f"{ROOT}/stations/{station_id}/metrics"
+
+
 def predictor_status() -> str:
     return f"{ROOT}/predictor/status"
+
+
+def predictor_control() -> str:
+    """Commands to the predictor node: outage."""
+    return f"{ROOT}/predictor/control"

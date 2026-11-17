@@ -71,19 +71,16 @@ services:
       - --port
       - "8000"
       - --reload
+    # Serves station and model facts from data/ and artifacts/; live data goes over MQTT.
     environment:
-      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-traffic}
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
-      DB_HOST: clickhouse
-      PORT: "8123"
       PYTHONPATH: /workspace
-    env_file:
-      - .env
+      IOT_STATION_ID: ${IOT_STATION_ID:-400237}
+      IOT_REPLAY_FILE: ${IOT_REPLAY_FILE:-400237_5min.csv.gz}
+      IOT_DATA_DIR: /workspace/data/stations
+      IOT_MODEL: ${IOT_MODEL:-ds15/experiments/sweep_window192_mark_setcompact_learning_rate0.0001}
+      IOT_MQTT_WS_URL: ${IOT_MQTT_WS_URL:-}
     volumes:
       - .:/workspace
-    depends_on:
-      - clickhouse
     networks:
       - traffic-net
 
@@ -95,6 +92,7 @@ services:
       - "5173:5173"
     environment:
       VITE_API_PROXY_TARGET: http://api:8000
+      VITE_POLL: "1"
     volumes:
       - ./app/frontend:/workspace/app/frontend
       - frontend_node_modules:/workspace/app/frontend/node_modules
@@ -124,13 +122,15 @@ services:
       context: .
       dockerfile: app/live/Dockerfile
     profiles: [iot]
+    restart: unless-stopped
     command: ["python", "-m", "app.iot.sensor_emulator"]
     environment:
       PYTHONUNBUFFERED: "1"
       STATION_ID: ${IOT_STATION_ID:-400237}
       REPLAY_CSV: /data/${IOT_REPLAY_FILE:-400237_5min.csv.gz}
-      REPLAY_START: ${IOT_REPLAY_START:-2025-06-02T00:00}
+      REPLAY_START: ${IOT_REPLAY_START:-2025-06-02T06:00}
       REPLAY_END: ${IOT_REPLAY_END:-}
+      REPLAY_AUTOSTART: ${IOT_REPLAY_AUTOSTART:-1}
       REPLAY_WARMUP_HOURS: ${IOT_REPLAY_WARMUP_HOURS:-192}
       REPLAY_SPEED: ${IOT_REPLAY_SPEED:-300}
       REPLAY_DROP_RATE: ${IOT_REPLAY_DROP_RATE:-0}
