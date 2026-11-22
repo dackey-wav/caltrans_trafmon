@@ -6,11 +6,18 @@ import json
 import logging
 import os
 import time
-from ftplib import FTP, FTP_TLS
 from datetime import UTC, datetime
+from ftplib import FTP, FTP_TLS
 from urllib.request import Request, urlopen
 
-from app.live.feed import FTP_FILE, Measurement, fresh_complete, parse_csv, parse_ftp_5min, validate_station_id
+from app.live.feed import (
+    FTP_FILE,
+    Measurement,
+    fresh_complete,
+    parse_csv,
+    parse_ftp_5min,
+    validate_station_id,
+)
 
 LOG = logging.getLogger(__name__)
 

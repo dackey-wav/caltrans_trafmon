@@ -18,7 +18,7 @@ LOCAL_TZ = "America/Los_Angeles"
 
 
 def _station_id() -> str:
-    return os.getenv("IOT_STATION_ID", "400237")
+    return os.getenv("IOT_STATION_ID", "1108617")
 
 
 def _replay_file() -> Path:
@@ -30,7 +30,7 @@ def _replay_file() -> Path:
 
 def _model_dir() -> Path:
     name = os.getenv(
-        "IOT_MODEL", "ds15/experiments/sweep_window192_mark_setcompact_learning_rate0.0001"
+        "IOT_MODEL", "sd15/experiments/w192_compact_lr1e-4"
     )
     return EXPERIMENTS / name
 

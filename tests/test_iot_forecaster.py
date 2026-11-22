@@ -1,5 +1,7 @@
 """The live forecaster reproduces the offline evaluation for the same origin."""
 
+import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -8,10 +10,23 @@ import pytest
 
 pytestmark = pytest.mark.ml_cpu
 
-EXP = Path("artifacts/forecast/timesnet/ds15/experiments/sweep_window192_mark_setcompact_learning_rate0.0001")
+EXP = Path("artifacts/forecast/timesnet") / os.getenv(
+    "IOT_MODEL", "sd15/experiments/w192_compact_lr1e-4"
+)
 
 
-@pytest.mark.skipif(not (EXP / "model.pt").exists(), reason="trained experiment not present")
+def _skip_reason() -> str | None:
+    if not (EXP / "model.pt").exists():
+        return "trained experiment not present"
+    from models.utils.constants import DEFAULT_CALENDAR_COLUMNS
+
+    marks = json.loads((EXP / "train_log.json").read_text())["feature_plan"]["mark_columns"]
+    if set(marks) - set(DEFAULT_CALENDAR_COLUMNS):
+        return "experiment was trained with another station's local calendar"
+    return None
+
+
+@pytest.mark.skipif(_skip_reason() is not None, reason=str(_skip_reason()))
 def test_live_forecast_matches_offline_predictions():
     from app.iot.forecaster import LiveForecaster
     from models.utils.multivariate_data_prep import load_dataset

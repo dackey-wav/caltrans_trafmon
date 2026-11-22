@@ -29,14 +29,13 @@ DEFAULT_CALENDAR_COLUMNS: list[str] = [
     "is_bridge_day",
     "is_long_weekend",
     "is_pre_long_weekend",
-    # Polish leftover. Always 0; kept so existing datasets keep their column set.
-    "is_shopping_sunday",
-    "is_school_break_morgan_hill",
-    "is_school_break_oak_grove",
-    "is_school_break_east_side",
-    "is_gavilan_spring_break",
-    "is_gavilan_regular_semester",
-    "is_gavilan_summer_session",
+    # Station-specific: schools, universities and events near VDS 1108617.
+    "is_school_break_sdusd",
+    "is_ucsd_in_session",
+    "is_usd_in_session",
+    "is_padres_home_game",
+    "is_del_mar_event",
+    "is_comic_con",
 ]
 
 EXTENDED_CALENDAR_COLUMNS = DEFAULT_CALENDAR_COLUMNS.copy()

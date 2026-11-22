@@ -67,16 +67,17 @@ All under `traffic/pems/`. `<id>` is the station ID.
 docker compose --profile iot up -d --build mqtt predictor sensor-emulator api frontend
 ```
 
-Open http://localhost:5173. Defaults replay station 400237 from
-`data/stations/400237_5min.csv.gz` (the `processed/observations.csv.gz` of
-pems-data-downloader) from 2025-06-02 06:00 at ×300. Override with `IOT_*`
+Open http://localhost:5173. Defaults replay station 1108617 from
+`data/stations/1108617_5min.csv.gz` (the `processed/observations.csv.gz` of
+pems-data-downloader) from 2026-09-28 06:00 at ×300 with model
+`sd15/experiments/w192_compact_lr1e-4`. Override with `IOT_*`
 variables in `.env` or the shell (see `docker-compose.yml`).
 
 Watch or drive it from a terminal as another client:
 
 ```bash
 docker compose exec mqtt mosquitto_sub -t 'traffic/pems/#' -v
-docker compose exec mqtt mosquitto_pub -t traffic/pems/stations/400237/control -q 1 -m '{"cmd":"speed","value":1200}'
+docker compose exec mqtt mosquitto_pub -t traffic/pems/stations/1108617/control -q 1 -m '{"cmd":"speed","value":1200}'
 ```
 
 The predictor also writes `artifacts/iot/evaluations_<id>.jsonl`,
@@ -93,8 +94,8 @@ The predictor also writes `artifacts/iot/evaluations_<id>.jsonl`,
 
 ## Limits
 
-- The bundled model was trained on station 400237 (District 4) and must be
-  retrained before it forecasts another station.
+- The model is station-specific (VDS 1108617 and its local calendar); another
+  station needs its own data, calendar flags and training run.
 - A "large deviation" is a 15-minute-ahead miss larger than `ANOMALY_Z`
   (default 6) times the running MAE after one day of scored buckets. There is
   no incident ground truth, so it is off by default in the dashboard.

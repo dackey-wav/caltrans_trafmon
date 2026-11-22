@@ -13,7 +13,7 @@ input and a week for its baseline), then streams from ``start``.
 
 Commands on ``.../control`` (JSON):
     {"cmd": "pause"} | {"cmd": "resume"} | {"cmd": "speed", "value": 600}
-    {"cmd": "reset", "start": "2025-06-02T06:00", "speed": 300, "paused": false}
+    {"cmd": "reset", "start": "2026-09-28T06:00", "speed": 300, "paused": false}
     {"cmd": "outage", "seconds": 30, "mode": "buffer" | "drop"}
     {"cmd": "loss", "value": 0.05}
 

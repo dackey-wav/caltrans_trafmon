@@ -74,10 +74,10 @@ services:
     # Serves station and model facts from data/ and artifacts/; live data goes over MQTT.
     environment:
       PYTHONPATH: /workspace
-      IOT_STATION_ID: ${IOT_STATION_ID:-400237}
-      IOT_REPLAY_FILE: ${IOT_REPLAY_FILE:-400237_5min.csv.gz}
+      IOT_STATION_ID: ${IOT_STATION_ID:-1108617}
+      IOT_REPLAY_FILE: ${IOT_REPLAY_FILE:-1108617_5min.csv.gz}
       IOT_DATA_DIR: /workspace/data/stations
-      IOT_MODEL: ${IOT_MODEL:-ds15/experiments/sweep_window192_mark_setcompact_learning_rate0.0001}
+      IOT_MODEL: ${IOT_MODEL:-sd15/experiments/w192_compact_lr1e-4}
       IOT_MQTT_WS_URL: ${IOT_MQTT_WS_URL:-}
     volumes:
       - .:/workspace
@@ -126,9 +126,9 @@ services:
     command: ["python", "-m", "app.iot.sensor_emulator"]
     environment:
       PYTHONUNBUFFERED: "1"
-      STATION_ID: ${IOT_STATION_ID:-400237}
-      REPLAY_CSV: /data/${IOT_REPLAY_FILE:-400237_5min.csv.gz}
-      REPLAY_START: ${IOT_REPLAY_START:-2025-06-02T06:00}
+      STATION_ID: ${IOT_STATION_ID:-1108617}
+      REPLAY_CSV: /data/${IOT_REPLAY_FILE:-1108617_5min.csv.gz}
+      REPLAY_START: ${IOT_REPLAY_START:-2026-09-28T06:00}
       REPLAY_END: ${IOT_REPLAY_END:-}
       REPLAY_AUTOSTART: ${IOT_REPLAY_AUTOSTART:-1}
       REPLAY_WARMUP_HOURS: ${IOT_REPLAY_WARMUP_HOURS:-192}
@@ -154,8 +154,8 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "app.iot.predictor"]
     environment:
-      STATION_ID: ${IOT_STATION_ID:-400237}
-      MODEL_DIR: /workspace/artifacts/forecast/timesnet/${IOT_MODEL:-ds15/experiments/sweep_window192_mark_setcompact_learning_rate0.0001}
+      STATION_ID: ${IOT_STATION_ID:-1108617}
+      MODEL_DIR: /workspace/artifacts/forecast/timesnet/${IOT_MODEL:-sd15/experiments/w192_compact_lr1e-4}
       OUTPUT_DIR: /workspace/artifacts/iot
       ANOMALY_Z: ${IOT_ANOMALY_Z:-6}
       MQTT_HOST: ${IOT_MQTT_HOST:-mqtt}

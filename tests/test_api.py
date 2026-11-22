@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.unit
 client = TestClient(app)
-EXP = Path("artifacts/forecast/timesnet/ds15/experiments/sweep_window192_mark_setcompact_learning_rate0.0001")
+EXP = Path("artifacts/forecast/timesnet/sd15/experiments/w192_compact_lr1e-4")
 
 
 def test_route_inventory():

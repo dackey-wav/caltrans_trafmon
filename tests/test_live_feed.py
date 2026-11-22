@@ -1,7 +1,7 @@
 """Contract tests for the live MQTT boundary, independent of Caltrans access."""
 
-import json
 import gzip
+import json
 import unittest
 from datetime import UTC, datetime
 from unittest.mock import patch
