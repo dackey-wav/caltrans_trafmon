@@ -11,14 +11,14 @@ in advance that tomorrow is a holiday.
 ## Workflow
 
 ```bash
-python -m app timesnet prepare --date-from 2022-08-01 --freq 15min --run-id ds15
-python -m app timesnet train --run-id ds15 --name base
-python -m app timesnet sweep --run-id ds15 --grid "window=192,672;d_model=64,128"
-python -m app timesnet compare --run-id ds15
+python -m app timesnet prepare --freq 15min --run-id sd15
+python -m app timesnet train --run-id sd15 --name base
+python -m app timesnet sweep --run-id sd15 --grid "window=192,672;d_model=64,128"
+python -m app timesnet compare --run-id sd15
 ```
 
 `train` evaluates on the test split right after training. Re-run the scoring
-and plots on their own with `timesnet evaluate --run-id ds15 --name base`.
+and plots on their own with `timesnet evaluate --run-id sd15 --name base`.
 
 Defaults: window 2 days, horizon 1 day (15min: 192 and 96 steps, 5min: 576
 and 288), Huber loss on robust-scaled targets, bf16 autocast on GPU.

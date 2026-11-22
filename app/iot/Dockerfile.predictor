@@ -1,0 +1,26 @@
+# Predictor node: CPU-only PyTorch + paho-mqtt. Dependencies live in /opt/venv
+# so a /workspace bind mount does not hide them.
+FROM python:3.11-slim
+
+WORKDIR /workspace
+
+ENV PYTHONPATH=/workspace \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:/root/.local/bin:${PATH}"
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh
+
+COPY pyproject.toml uv.lock /workspace/
+RUN uv venv "$VIRTUAL_ENV" \
+    && uv sync --frozen --no-install-project --active --group ml-cpu --group iot
+
+COPY app /workspace/app
+COPY models /workspace/models
+
+CMD ["python", "-m", "app.iot.predictor"]

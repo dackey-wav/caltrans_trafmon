@@ -44,6 +44,9 @@ dev = [
     "pytest-timeout>=2.3",
     "ruff>=0.9",
 ]
+iot = [
+    "paho-mqtt==2.1.0",
+]
 ml = [
     "scikit-learn>=1.5",
     "einops>=0.7.0",

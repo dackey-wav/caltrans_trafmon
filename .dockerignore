@@ -17,3 +17,4 @@ artifacts
 *.log
 .cursor
 terminals
+data

@@ -35,12 +35,12 @@ from models.utils.constants import (
     OBSERVED_ACTIVE_MIN_PERCENT,
     SUPPORTED_FREQS,
 )
+from models.utils.local_calendar import LOCAL_CALENDAR_COLUMNS, build_local_calendar
 from models.utils.multivariate_grid import (
     attach_active_columns,
     fill_gap_values_in_span,
     list_active_columns,
 )
-from models.utils.school_calendar import SCHOOL_CALENDAR_COLUMNS, build_school_calendar
 
 
 @dataclass
@@ -178,12 +178,9 @@ def _build_day_calendar(day_index: pd.DatetimeIndex) -> pd.DataFrame:
         -1, fill_value=False
     )
 
-    # Polish leftover. No shopping-Sunday rule exists here, so it stays 0.
-    cal["is_shopping_sunday"] = False
-
-    school = build_school_calendar(day_index)
-    for column in SCHOOL_CALENDAR_COLUMNS:
-        cal[column] = school[column]
+    local = build_local_calendar(day_index)
+    for column in LOCAL_CALENDAR_COLUMNS:
+        cal[column] = local[column]
 
     return cal
 
@@ -259,8 +256,7 @@ def _calendar_columns(index: pd.DatetimeIndex, columns: Sequence[str]) -> pd.Dat
         "is_bridge_day",
         "is_long_weekend",
         "is_pre_long_weekend",
-        "is_shopping_sunday",
-        *SCHOOL_CALENDAR_COLUMNS,
+        *LOCAL_CALENDAR_COLUMNS,
     }
     if holiday_feats & requested:
         local_days = local.tz_localize(None).normalize()

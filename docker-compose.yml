@@ -71,19 +71,16 @@ services:
       - --port
       - "8000"
       - --reload
+    # Serves station and model facts from data/ and artifacts/; live data goes over MQTT.
     environment:
-      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-traffic}
-      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
-      DB_HOST: clickhouse
-      PORT: "8123"
       PYTHONPATH: /workspace
-    env_file:
-      - .env
+      IOT_STATION_ID: ${IOT_STATION_ID:-1108617}
+      IOT_REPLAY_FILE: ${IOT_REPLAY_FILE:-1108617_5min.csv.gz}
+      IOT_DATA_DIR: /workspace/data/stations
+      IOT_MODEL: ${IOT_MODEL:-sd15/experiments/w192_compact_lr1e-4}
+      IOT_MQTT_WS_URL: ${IOT_MQTT_WS_URL:-}
     volumes:
       - .:/workspace
-    depends_on:
-      - clickhouse
     networks:
       - traffic-net
 
@@ -95,6 +92,7 @@ services:
       - "5173:5173"
     environment:
       VITE_API_PROXY_TARGET: http://api:8000
+      VITE_POLL: "1"
     volumes:
       - ./app/frontend:/workspace/app/frontend
       - frontend_node_modules:/workspace/app/frontend/node_modules
@@ -103,10 +101,119 @@ services:
     networks:
       - traffic-net
 
+  # MQTT broker shared by the live PeMS bridge (profile live) and the IoT demo
+  # (profile iot). Port 1883 is open to the LAN so a second machine can run
+  # one of the nodes; see app/iot/README.md before exposing it.
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    profiles: [live, iot]
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./app/iot/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt_data:/mosquitto/data
+    networks:
+      - traffic-net
+
+  # IoT demo, device 1: replays a downloaded station CSV as a live 5-minute feed.
+  sensor-emulator:
+    build:
+      context: .
+      dockerfile: app/live/Dockerfile
+    profiles: [iot]
+    restart: unless-stopped
+    command: ["python", "-m", "app.iot.sensor_emulator"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      STATION_ID: ${IOT_STATION_ID:-1108617}
+      REPLAY_CSV: /data/${IOT_REPLAY_FILE:-1108617_5min.csv.gz}
+      REPLAY_START: ${IOT_REPLAY_START:-2026-09-28T06:00}
+      REPLAY_END: ${IOT_REPLAY_END:-}
+      REPLAY_AUTOSTART: ${IOT_REPLAY_AUTOSTART:-1}
+      REPLAY_WARMUP_HOURS: ${IOT_REPLAY_WARMUP_HOURS:-192}
+      REPLAY_SPEED: ${IOT_REPLAY_SPEED:-300}
+      REPLAY_DROP_RATE: ${IOT_REPLAY_DROP_RATE:-0}
+      REPLAY_WAIT_PREDICTOR: ${IOT_REPLAY_WAIT_PREDICTOR:-120}
+      MQTT_HOST: ${IOT_MQTT_HOST:-mqtt}
+      MQTT_PORT: ${IOT_MQTT_PORT:-1883}
+      MQTT_USERNAME: ${IOT_MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${IOT_MQTT_PASSWORD:-}
+    volumes:
+      - ${IOT_DATA_DIR:-./data/stations}:/data:ro
+    depends_on: [mqtt]
+    networks:
+      - traffic-net
+
+  # IoT demo, device 2: forecasts the feed with TimesNet and checks it against the facts.
+  predictor:
+    build:
+      context: .
+      dockerfile: app/iot/Dockerfile.predictor
+    profiles: [iot]
+    restart: unless-stopped
+    command: ["python", "-m", "app.iot.predictor"]
+    environment:
+      STATION_ID: ${IOT_STATION_ID:-1108617}
+      MODEL_DIR: /workspace/artifacts/forecast/timesnet/${IOT_MODEL:-sd15/experiments/w192_compact_lr1e-4}
+      OUTPUT_DIR: /workspace/artifacts/iot
+      ANOMALY_Z: ${IOT_ANOMALY_Z:-6}
+      MQTT_HOST: ${IOT_MQTT_HOST:-mqtt}
+      MQTT_PORT: ${IOT_MQTT_PORT:-1883}
+      MQTT_USERNAME: ${IOT_MQTT_USERNAME:-}
+      MQTT_PASSWORD: ${IOT_MQTT_PASSWORD:-}
+    volumes:
+      - ./artifacts:/workspace/artifacts
+    depends_on: [mqtt]
+    networks:
+      - traffic-net
+
+  pems-publisher:
+    build:
+      context: .
+      dockerfile: app/live/Dockerfile
+    profiles: [live]
+    restart: unless-stopped
+    command: ["python", "-m", "app.live.publisher"]
+    environment:
+      PEMS_STATION_ID: ${PEMS_STATION_ID:-}
+      PEMS_SOURCE_MODE: ${PEMS_SOURCE_MODE:-ftp}
+      PEMS_FTP_HOST: ${PEMS_FTP_HOST:-pems.dot.ca.gov}
+      PEMS_FTP_USER: ${PEMS_FTP_USER:-}
+      PEMS_FTP_PASSWORD: ${PEMS_FTP_PASSWORD:-}
+      PEMS_FTP_TLS: ${PEMS_FTP_TLS:-1}
+      PEMS_DISTRICT: ${PEMS_DISTRICT:-11}
+      PEMS_SOURCE_URL: ${PEMS_SOURCE_URL:-}
+      PEMS_HTTP_COOKIE: ${PEMS_HTTP_COOKIE:-}
+      PEMS_POLL_SECONDS: ${PEMS_POLL_SECONDS:-300}
+      MQTT_HOST: mqtt
+    depends_on: [mqtt]
+    networks:
+      - traffic-net
+
+  pems-consumer:
+    build:
+      context: .
+      dockerfile: app/live/Dockerfile
+    profiles: [live]
+    restart: unless-stopped
+    command: ["python", "-m", "app.live.consumer"]
+    environment:
+      PEMS_STATION_ID: ${PEMS_STATION_ID:-}
+      MQTT_HOST: mqtt
+      DB_HOST: clickhouse
+      PORT: "8123"
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    depends_on: [mqtt, clickhouse]
+    networks:
+      - traffic-net
+
 volumes:
   ch_data:
   ch_logs:
   frontend_node_modules:
+  mqtt_data:
 
 networks:
   traffic-net:
